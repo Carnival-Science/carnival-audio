@@ -109,6 +109,25 @@ Double_Accessor :: #type proc "c" () -> f64
 Float_Accessor :: #type proc "c" () -> f32
 @(private = "file")
 U32_Accessor :: #type proc "c" () -> u32
+@(private = "file")
+Seed_Accessor :: #type proc "c" (count: u32) -> i32
+
+@(private = "file")
+Capture_Collect :: struct {
+	records: [8]Carnival_Measurement_Record,
+	count:   int,
+}
+
+@(private = "file")
+capture_push :: proc "c" (ctx: rawptr, record: ^Carnival_Measurement_Record) -> bool {
+	state := cast(^Capture_Collect)ctx
+	if state == nil || record == nil || state.count >= len(state.records) {
+		return false
+	}
+	state.records[state.count] = record^
+	state.count += 1
+	return true
+}
 
 @(test)
 test_c_calling_convention_through_clap_vtables :: proc(t: ^testing.T) {
@@ -269,6 +288,56 @@ test_c_calling_convention_through_clap_vtables :: proc(t: ^testing.T) {
 		testing.expect_value(t, string(info.port_type), CLAP_PORT_STEREO)
 	}
 	testing.expect(t, plugin.get_extension(plugin, cstring("probe.unknown")) == nil, "unknown extension is nil")
+
+	// Draft Carnival telemetry extension, implemented by the C plugin and
+	// driven through the Odin declaration. This is the private-draft ABI proof:
+	// plugin-implemented vtable, by-value sink struct, and an Odin callback
+	// invoked by C.
+	telemetry := cast(^Carnival_Telemetry_Capture)plugin.get_extension(
+		plugin, cstring(CARNIVAL_EXT_TELEMETRY_CAPTURE_DRAFT))
+	testing.expect(t, telemetry != nil, "C plugin.get_extension(carnival telemetry draft)")
+	if telemetry != nil {
+		testing.expect_value(t, telemetry.schema_version(plugin), CARNIVAL_MEASUREMENT_SCHEMA_VERSION)
+		testing.expect(t, telemetry.valid(plugin), "capture valid before enable")
+		testing.expect_value(t, telemetry.dropped(plugin), u64(0))
+		testing.expect(t, telemetry.set_enabled(plugin, true), "capture set_enabled through C")
+
+		seed := cast(Seed_Accessor)library_symbol(library, "probe_capture_seed")
+		testing.expect_value(t, seed(3), i32(3))
+
+		collect: Capture_Collect
+		sink := Carnival_Capture_Sink{ctx = &collect, push = capture_push}
+		delivered := telemetry.drain(plugin, sink, 2)
+		testing.expect_value(t, delivered, u32(2))
+		testing.expect_value(t, collect.count, 2)
+		if collect.count == 2 {
+			testing.expect_value(t, collect.records[0].schema_version, CARNIVAL_MEASUREMENT_SCHEMA_VERSION)
+			testing.expect_value(t, collect.records[0].epoch, u64(7))
+			testing.expect_value(t, collect.records[0].generation, u64(1))
+			testing.expect_value(t, collect.records[0].start_frame, i64(0))
+			testing.expect_value(t, collect.records[0].rms[0], f32(0.25))
+			testing.expect(t, collect.records[0].valid && collect.records[0].capture_valid,
+				"C record domain flags")
+			testing.expect_value(t, collect.records[1].generation, u64(2))
+			testing.expect_value(t, collect.records[1].start_frame, i64(1024))
+		}
+		// max_records == 0 drains the remainder.
+		delivered = telemetry.drain(plugin, sink, 0)
+		testing.expect_value(t, delivered, u32(1))
+		testing.expect_value(t, collect.count, 3)
+		testing.expect_value(t, telemetry.drain(plugin, sink, 0), u32(0))
+
+		overflow := cast(Int_Accessor)library_symbol(library, "probe_capture_force_overflow")
+		testing.expect_value(t, overflow(), i32(2))
+		testing.expect_value(t, telemetry.dropped(plugin), u64(2))
+		testing.expect(t, !telemetry.valid(plugin), "capture invalid after forced overflow")
+
+		testing.expect(t, telemetry.set_enabled(plugin, false), "capture set_enabled(false)")
+		enabled := (cast(Int_Accessor)library_symbol(library, "probe_capture_enabled"))()
+		testing.expect_value(t, enabled, i32(0))
+		testing.expect_value(t, telemetry.dropped(plugin), u64(0))
+		testing.expect(t, telemetry.valid(plugin), "disable restores capture validity")
+	}
 
 	plugin.stop_processing(plugin)
 	plugin.deactivate(plugin)

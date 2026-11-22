@@ -66,6 +66,9 @@ test_c_abi_layout_matches_odin :: proc(t: ^testing.T) {
 		{"Host_Audio_Ports", size_of(Host_Audio_Ports)},
 		{"Host_Params", size_of(Host_Params)},
 		{"Plugin_Render", size_of(Plugin_Render)},
+		{"Carnival_Measurement_Record", size_of(Carnival_Measurement_Record)},
+		{"Carnival_Capture_Sink", size_of(Carnival_Capture_Sink)},
+		{"Carnival_Telemetry_Capture", size_of(Carnival_Telemetry_Capture)},
 	}
 	size_seen := make([]bool, len(size_cases), context.allocator)
 	defer delete(size_seen)
@@ -203,6 +206,27 @@ test_c_abi_layout_matches_odin :: proc(t: ^testing.T) {
 		{"Host_Params.request_flush", int(offset_of(Host_Params, request_flush))},
 		{"Plugin_Render.has_hard_realtime_requirement", int(offset_of(Plugin_Render, has_hard_realtime_requirement))},
 		{"Plugin_Render.set", int(offset_of(Plugin_Render, set))},
+		{"Carnival_Measurement_Record.schema_version", int(offset_of(Carnival_Measurement_Record, schema_version))},
+		{"Carnival_Measurement_Record.epoch", int(offset_of(Carnival_Measurement_Record, epoch))},
+		{"Carnival_Measurement_Record.generation", int(offset_of(Carnival_Measurement_Record, generation))},
+		{"Carnival_Measurement_Record.start_frame", int(offset_of(Carnival_Measurement_Record, start_frame))},
+		{"Carnival_Measurement_Record.frames", int(offset_of(Carnival_Measurement_Record, frames))},
+		{"Carnival_Measurement_Record.channels", int(offset_of(Carnival_Measurement_Record, channels))},
+		{"Carnival_Measurement_Record.sample_rate", int(offset_of(Carnival_Measurement_Record, sample_rate))},
+		{"Carnival_Measurement_Record.peak", int(offset_of(Carnival_Measurement_Record, peak))},
+		{"Carnival_Measurement_Record.peak_frame", int(offset_of(Carnival_Measurement_Record, peak_frame))},
+		{"Carnival_Measurement_Record.rms", int(offset_of(Carnival_Measurement_Record, rms))},
+		{"Carnival_Measurement_Record.hold", int(offset_of(Carnival_Measurement_Record, hold))},
+		{"Carnival_Measurement_Record.valid", int(offset_of(Carnival_Measurement_Record, valid))},
+		{"Carnival_Measurement_Record.overrun", int(offset_of(Carnival_Measurement_Record, overrun))},
+		{"Carnival_Measurement_Record.capture_valid", int(offset_of(Carnival_Measurement_Record, capture_valid))},
+		{"Carnival_Capture_Sink.ctx", int(offset_of(Carnival_Capture_Sink, ctx))},
+		{"Carnival_Capture_Sink.push", int(offset_of(Carnival_Capture_Sink, push))},
+		{"Carnival_Telemetry_Capture.set_enabled", int(offset_of(Carnival_Telemetry_Capture, set_enabled))},
+		{"Carnival_Telemetry_Capture.drain", int(offset_of(Carnival_Telemetry_Capture, drain))},
+		{"Carnival_Telemetry_Capture.dropped", int(offset_of(Carnival_Telemetry_Capture, dropped))},
+		{"Carnival_Telemetry_Capture.valid", int(offset_of(Carnival_Telemetry_Capture, valid))},
+		{"Carnival_Telemetry_Capture.schema_version", int(offset_of(Carnival_Telemetry_Capture, schema_version))},
 	}
 	offset_seen := make([]bool, len(offset_cases), context.allocator)
 	defer delete(offset_seen)
@@ -240,6 +264,31 @@ test_c_abi_layout_matches_odin :: proc(t: ^testing.T) {
 			testing.expect_value(t, fields[1], fmt.tprint(CLAP_NAME_SIZE))
 		case "path_size":
 			testing.expect_value(t, fields[1], fmt.tprint(CLAP_PATH_SIZE))
+		case "carnival_ext_id":
+			testing.expect_value(t, fields[1], CARNIVAL_EXT_TELEMETRY_CAPTURE_DRAFT)
+		case "carnival_schema_version":
+			testing.expect_value(t, fields[1], fmt.tprint(CARNIVAL_MEASUREMENT_SCHEMA_VERSION))
+		case "carnival_channels":
+			testing.expect_value(t, fields[1], fmt.tprint(CARNIVAL_MEASUREMENT_CHANNELS))
+		case "carnival_uuid":
+			if len(fields) != 18 {
+				testing.expectf(t, false, "malformed carnival_uuid line: %q", line)
+				continue
+			}
+			expected: [16]u8
+			if fields[1] == "telemetry" {
+				expected = CARNIVAL_TELEMETRY_DRAFT_UUID
+			} else if fields[1] == "schema" {
+				expected = CARNIVAL_MEASUREMENT_SCHEMA_UUID
+			} else {
+				testing.expectf(t, false, "unknown carnival_uuid name: %q", fields[1])
+				continue
+			}
+			for byte_index in 0 ..< 16 {
+				testing.expectf(t, fields[2 + byte_index] == fmt.tprint(expected[byte_index]),
+					"carnival_uuid %s byte %d: C %s, Odin %d",
+					fields[1], byte_index, fields[2 + byte_index], expected[byte_index])
+			}
 		case "size":
 			if len(fields) != 3 {
 				testing.expectf(t, false, "malformed size line: %q", line)

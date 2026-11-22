@@ -15,6 +15,7 @@ param(
 $ErrorActionPreference = 'Stop'
 $repoRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..\..')).Path
 $include = Join-Path $repoRoot 'third_party\clap\vendor\include'
+$draftInclude = Join-Path $repoRoot 'third_party\clap\draft'
 New-Item -ItemType Directory -Force -Path $OutDir | Out-Null
 $probeExe = Join-Path $OutDir 'abi_probe.exe'
 $probeDll = Join-Path $OutDir 'clap_cc_probe.dll'
@@ -32,7 +33,7 @@ if (-not (Test-Path -LiteralPath $vcvars)) {
     throw "vcvars64.bat not found under '$installation'."
 }
 
-$common = "/nologo /std:c11 /W4 /WX /I`"$include`""
+$common = "/nologo /std:c11 /W4 /WX /I`"$include`" /I`"$draftInclude`""
 $exeCmd = "call `"$vcvars`" >nul && cl $common `"$PSScriptRoot\abi_probe.c`" /Fe:`"$probeExe`""
 Write-Host "abi: compiling C layout probe"
 Push-Location -LiteralPath $OutDir

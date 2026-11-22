@@ -34,8 +34,11 @@
 #include "clap/events.h"
 #include "clap/ext/audio-ports.h"
 #include "clap/factory/plugin-factory.h"
+#include "carnival-telemetry-capture.h"
 
 #define PROBE_MARKER ((const void *)(uintptr_t)0x5A5A5A5A5A5A5A5Aull)
+
+#define PROBE_CAPTURE_CAPACITY 3u
 
 static int g_inited = 0;
 static int g_destroyed = 0;
@@ -46,6 +49,14 @@ static double g_param_value = 0.0;
 static float g_first_input = 0.0f;
 static uint32_t g_last_frames = 0;
 static int g_host_restart_calls = 0;
+
+static clap_carnival_measurement_record_t g_capture_records[PROBE_CAPTURE_CAPACITY];
+static uint32_t g_capture_count = 0;
+static uint32_t g_capture_read = 0;
+static bool g_capture_enabled = false;
+static uint64_t g_capture_dropped = 0;
+static bool g_capture_valid = true;
+static uint32_t g_capture_schema_calls = 0;
 
 typedef struct probe_instance {
    const clap_host_t *host;
@@ -108,6 +119,60 @@ static const clap_plugin_audio_ports_t g_audio_ports = {
     probe_ports_get,
 };
 
+// --- Draft Carnival telemetry extension (implemented in C) -----------------
+
+static bool probe_capture_set_enabled(const clap_plugin_t *plugin, bool enabled) {
+   (void)plugin;
+   g_capture_enabled = enabled;
+   g_capture_count = 0;
+   g_capture_read = 0;
+   g_capture_dropped = 0;
+   g_capture_valid = true;
+   return true;
+}
+
+static uint32_t probe_capture_drain(const clap_plugin_t *plugin,
+                                    clap_carnival_capture_sink_t sink,
+                                    uint32_t max_records) {
+   (void)plugin;
+   if (sink.push == NULL)
+      return 0;
+   const uint32_t pending = g_capture_count - g_capture_read;
+   const uint32_t limit = max_records == 0 ? pending : (max_records < pending ? max_records : pending);
+   uint32_t delivered = 0;
+   while (delivered < limit && g_capture_read < g_capture_count) {
+      if (!sink.push(sink.ctx, &g_capture_records[g_capture_read]))
+         break;
+      g_capture_read += 1;
+      delivered += 1;
+   }
+   return delivered;
+}
+
+static uint64_t probe_capture_dropped(const clap_plugin_t *plugin) {
+   (void)plugin;
+   return g_capture_dropped;
+}
+
+static bool probe_capture_valid(const clap_plugin_t *plugin) {
+   (void)plugin;
+   return g_capture_valid;
+}
+
+static uint32_t probe_capture_schema_version(const clap_plugin_t *plugin) {
+   (void)plugin;
+   g_capture_schema_calls += 1;
+   return CARNIVAL_MEASUREMENT_SCHEMA_VERSION;
+}
+
+static const clap_carnival_telemetry_capture_t g_telemetry = {
+    probe_capture_set_enabled,
+    probe_capture_drain,
+    probe_capture_dropped,
+    probe_capture_valid,
+    probe_capture_schema_version,
+};
+
 static clap_process_status probe_plugin_process(const clap_plugin_t *plugin,
                                                 const clap_process_t *process) {
    probe_instance *instance = (probe_instance *)plugin->plugin_data;
@@ -167,6 +232,8 @@ static const void *probe_plugin_get_extension(const clap_plugin_t *plugin, const
    (void)plugin;
    if (strcmp(id, CLAP_EXT_AUDIO_PORTS) == 0)
       return &g_audio_ports;
+   if (strcmp(id, CARNIVAL_EXT_TELEMETRY_CAPTURE_DRAFT) == 0)
+      return &g_telemetry;
    return NULL;
 }
 
@@ -213,6 +280,12 @@ static const clap_plugin_t *probe_factory_create(const clap_plugin_factory_t *fa
    g_first_input = 0.0f;
    g_last_frames = 0;
    g_host_restart_calls = 0;
+   g_capture_count = 0;
+   g_capture_read = 0;
+   g_capture_enabled = false;
+   g_capture_dropped = 0;
+   g_capture_valid = true;
+   g_capture_schema_calls = 0;
 
    g_plugin.desc = &g_descriptor;
    g_plugin.plugin_data = &g_instance;
@@ -264,3 +337,46 @@ PROBE_EXPORT double probe_param_value(void) { return g_param_value; }
 PROBE_EXPORT float probe_first_input(void) { return g_first_input; }
 PROBE_EXPORT uint32_t probe_last_frames(void) { return g_last_frames; }
 PROBE_EXPORT int probe_host_restart_calls(void) { return g_host_restart_calls; }
+
+// Draft Carnival telemetry helpers, reached by the Odin host through plain
+// exported C symbols. They exercise the same vtable the host calls normally.
+PROBE_EXPORT int probe_capture_seed(unsigned count) {
+   if (!g_capture_enabled)
+      return 0;
+   if (count > PROBE_CAPTURE_CAPACITY)
+      count = PROBE_CAPTURE_CAPACITY;
+   g_capture_count = count;
+   g_capture_read = 0;
+   for (unsigned i = 0; i < count; ++i) {
+      clap_carnival_measurement_record_t *record = &g_capture_records[i];
+      memset(record, 0, sizeof(*record));
+      record->schema_version = CARNIVAL_MEASUREMENT_SCHEMA_VERSION;
+      record->epoch = 7;
+      record->generation = (uint64_t)i + 1;
+      record->start_frame = (int64_t)i * 1024;
+      record->frames = 1024;
+      record->channels = CARNIVAL_MEASUREMENT_CHANNELS;
+      record->sample_rate = 48000;
+      record->peak[0] = 0.5f;
+      record->peak[1] = 0.25f;
+      record->peak_frame[0] = 3;
+      record->rms[0] = 0.25f;
+      record->hold[0] = 0.5f;
+      record->valid = true;
+      record->overrun = false;
+      record->capture_valid = true;
+   }
+   return (int)count;
+}
+
+PROBE_EXPORT int probe_capture_force_overflow(void) {
+   g_capture_dropped += 2;
+   g_capture_valid = false;
+   return (int)g_capture_dropped;
+}
+
+PROBE_EXPORT int probe_capture_enabled(void) { return g_capture_enabled ? 1 : 0; }
+PROBE_EXPORT unsigned probe_capture_schema_constant(void) {
+   return CARNIVAL_MEASUREMENT_SCHEMA_VERSION;
+}
+PROBE_EXPORT unsigned probe_capture_schema_calls(void) { return g_capture_schema_calls; }

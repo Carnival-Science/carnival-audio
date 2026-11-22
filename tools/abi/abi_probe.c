@@ -34,6 +34,10 @@
 #include "clap/ext/render.h"
 #include "clap/factory/plugin-factory.h"
 
+// Draft private extension (not upstream CLAP). Included from
+// third_party/clap/draft, which the build adds to the include path.
+#include "carnival-telemetry-capture.h"
+
 #define SIZE(odin_name, c_type) printf("size %s %zu\n", odin_name, sizeof(c_type))
 #define FIELD(odin_name, odin_field, c_type, c_field)                              \
    printf("offset %s.%s %zu\n", odin_name, odin_field, offsetof(c_type, c_field))
@@ -246,6 +250,59 @@ int main(void) {
    FIELD("Plugin_Render", "has_hard_realtime_requirement", clap_plugin_render_t,
          has_hard_realtime_requirement);
    FIELD("Plugin_Render", "set", clap_plugin_render_t, set);
+
+   // Draft Carnival telemetry extension (ABI proof for the private draft).
+   printf("carnival_ext_id %s\n", CARNIVAL_EXT_TELEMETRY_CAPTURE_DRAFT);
+   printf("carnival_schema_version %u\n", (unsigned)CARNIVAL_MEASUREMENT_SCHEMA_VERSION);
+   printf("carnival_channels %u\n", (unsigned)CARNIVAL_MEASUREMENT_CHANNELS);
+
+   {
+      const unsigned char telemetry_uuid[16] = CARNIVAL_TELEMETRY_DRAFT_UUID;
+      const unsigned char schema_uuid[16] = CARNIVAL_MEASUREMENT_SCHEMA_UUID;
+      printf("carnival_uuid telemetry");
+      for (int i = 0; i < 16; ++i)
+         printf(" %u", (unsigned)telemetry_uuid[i]);
+      printf("\n");
+      printf("carnival_uuid schema");
+      for (int i = 0; i < 16; ++i)
+         printf(" %u", (unsigned)schema_uuid[i]);
+      printf("\n");
+   }
+
+   SIZE("Carnival_Measurement_Record", clap_carnival_measurement_record_t);
+   FIELD("Carnival_Measurement_Record", "schema_version", clap_carnival_measurement_record_t,
+         schema_version);
+   FIELD("Carnival_Measurement_Record", "epoch", clap_carnival_measurement_record_t, epoch);
+   FIELD("Carnival_Measurement_Record", "generation", clap_carnival_measurement_record_t,
+         generation);
+   FIELD("Carnival_Measurement_Record", "start_frame", clap_carnival_measurement_record_t,
+         start_frame);
+   FIELD("Carnival_Measurement_Record", "frames", clap_carnival_measurement_record_t, frames);
+   FIELD("Carnival_Measurement_Record", "channels", clap_carnival_measurement_record_t, channels);
+   FIELD("Carnival_Measurement_Record", "sample_rate", clap_carnival_measurement_record_t,
+         sample_rate);
+   FIELD("Carnival_Measurement_Record", "peak", clap_carnival_measurement_record_t, peak);
+   FIELD("Carnival_Measurement_Record", "peak_frame", clap_carnival_measurement_record_t,
+         peak_frame);
+   FIELD("Carnival_Measurement_Record", "rms", clap_carnival_measurement_record_t, rms);
+   FIELD("Carnival_Measurement_Record", "hold", clap_carnival_measurement_record_t, hold);
+   FIELD("Carnival_Measurement_Record", "valid", clap_carnival_measurement_record_t, valid);
+   FIELD("Carnival_Measurement_Record", "overrun", clap_carnival_measurement_record_t, overrun);
+   FIELD("Carnival_Measurement_Record", "capture_valid", clap_carnival_measurement_record_t,
+         capture_valid);
+
+   SIZE("Carnival_Capture_Sink", clap_carnival_capture_sink_t);
+   FIELD("Carnival_Capture_Sink", "ctx", clap_carnival_capture_sink_t, ctx);
+   FIELD("Carnival_Capture_Sink", "push", clap_carnival_capture_sink_t, push);
+
+   SIZE("Carnival_Telemetry_Capture", clap_carnival_telemetry_capture_t);
+   FIELD("Carnival_Telemetry_Capture", "set_enabled", clap_carnival_telemetry_capture_t,
+         set_enabled);
+   FIELD("Carnival_Telemetry_Capture", "drain", clap_carnival_telemetry_capture_t, drain);
+   FIELD("Carnival_Telemetry_Capture", "dropped", clap_carnival_telemetry_capture_t, dropped);
+   FIELD("Carnival_Telemetry_Capture", "valid", clap_carnival_telemetry_capture_t, valid);
+   FIELD("Carnival_Telemetry_Capture", "schema_version", clap_carnival_telemetry_capture_t,
+         schema_version);
 
    return 0;
 }

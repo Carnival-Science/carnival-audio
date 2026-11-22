@@ -4,11 +4,25 @@ This directory is the neutral home for **CLAP protocol declarations**: foreign
 bindings for the official CLAP C headers (`clap/clap.h` and its entries), not a
 CLAP implementation, adapter or DSP library.
 
-Status: **implemented for Milestone 1.** The package declares CLAP 1.2.10
+Status: **implemented for Milestone 1**, with one clearly separated Milestone 2
+preparation addition. The package declares CLAP 1.2.10
 (`third_party/clap/abi`) and vendors the exact MIT header subset used to prove
 those declarations (`vendor/`, provenance in `UPSTREAM.md`). The C layout and
 calling-convention probes live in `tools/abi/`; tests in `abi/abi_test.odin`
 and `abi/cc_test.odin` fail if the C headers and Odin declarations disagree.
+
+## Draft private extension (not CLAP)
+
+`abi/ext_carnival.odin` and `draft/carnival-telemetry-capture.h` declare the
+**Carnival telemetry-capture draft**: a private, experimental extension that
+lets an independent host inspect Pulse's canonical measurement records through
+the real plugin binary. It is **not** a CLAP standard proposal, is not
+submitted upstream, and its id, UUIDs, vtable and record schema may change. See
+[`docs/draft-telemetry-extension.md`](../../docs/draft-telemetry-extension.md).
+
+This is still declaration-only surface: the record struct is a wire layout, not
+measurement or analysis code. It is kept outside `vendor/` so the upstream CLAP
+header subset remains byte-identical to the pinned release.
 
 ## Why a neutral package
 

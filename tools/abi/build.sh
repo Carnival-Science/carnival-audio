@@ -12,24 +12,25 @@ set -eu
 root=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
 out="$root/out/abi"
 include="$root/third_party/clap/vendor/include"
+draft_include="$root/third_party/clap/draft"
 cc=${CC:-cc}
 
 mkdir -p "$out"
 
 echo "abi: compiling C layout probe with $cc"
-"$cc" -std=c11 -O2 -Wall -Wextra -Werror -I"$include" \
+"$cc" -std=c11 -O2 -Wall -Wextra -Werror -I"$include" -I"$draft_include" \
     "$root/tools/abi/abi_probe.c" -o "$out/abi_probe"
 
 echo "abi: compiling C calling-convention probe with $cc"
 case "$(uname -s)" in
     Darwin)
         lib="$out/libclap_cc_probe.dylib"
-        "$cc" -std=c11 -O2 -Wall -Wextra -Werror -fPIC -shared -I"$include" \
+        "$cc" -std=c11 -O2 -Wall -Wextra -Werror -fPIC -shared -I"$include" -I"$draft_include" \
             "$root/tools/abi/cc_probe.c" -o "$lib"
         ;;
     *)
         lib="$out/libclap_cc_probe.so"
-        "$cc" -std=c11 -O2 -Wall -Wextra -Werror -fPIC -shared -I"$include" \
+        "$cc" -std=c11 -O2 -Wall -Wextra -Werror -fPIC -shared -I"$include" -I"$draft_include" \
             "$root/tools/abi/cc_probe.c" -o "$lib"
         ;;
 esac

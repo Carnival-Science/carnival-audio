@@ -2,8 +2,11 @@
 
 `third_party/clap` is **neutral CLAP ABI surface**, not an implementation.
 
-- It holds foreign declarations for the official CLAP headers only. No DSP, no
-  measurement code, no plugin implementation, no host implementation.
+- It holds foreign declarations for the official CLAP headers, plus one clearly
+  marked private draft extension (`abi/ext_carnival.odin`,
+  `draft/carnival-telemetry-capture.h`) for Carnival-internal verification. The
+  draft is not a CLAP standard proposal. No DSP, no measurement code, no plugin
+  implementation, no host implementation.
 - It may import Odin `core:` packages and its own subpackages. It must never
   import `core/`, `adapters/`, `products/`, `verification/`, Alicorn, SDL3,
   miniaudio or a platform audio backend.
