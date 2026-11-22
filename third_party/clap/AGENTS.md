@@ -11,8 +11,10 @@
   therefore share the protocol declaration with the plugin under test; it still
   must not share `core/dsp`, `adapters/` or `products/`.
 
-Milestone 1 adds the declarations from the official CLAP headers. Preserve the
-upstream version, commit/tag and MIT license notice with them.
+Milestone 1 added the declarations from the official CLAP 1.2.10 headers, the
+vendored header subset, and independent C layout/calling-convention probes.
+Preserve the upstream version, commit/tag and MIT license notice with them
+(`UPSTREAM.md`, `vendor/`).
 
 Extraction into a standalone open-source package is allowed only after **both**
 a real plugin (`adapters/clap`) and an independent host (`verification/`) use

@@ -4,9 +4,11 @@ This directory is the neutral home for **CLAP protocol declarations**: foreign
 bindings for the official CLAP C headers (`clap/clap.h` and its entries), not a
 CLAP implementation, adapter or DSP library.
 
-Status: **placeholder.** Milestone 0 creates the scope and its boundary rule;
-the declarations arrive with Milestone 1. There are deliberately no `.odin`
-files here yet.
+Status: **implemented for Milestone 1.** The package declares CLAP 1.2.10
+(`third_party/clap/abi`) and vendors the exact MIT header subset used to prove
+those declarations (`vendor/`, provenance in `UPSTREAM.md`). The C layout and
+calling-convention probes live in `tools/abi/`; tests in `abi/abi_test.odin`
+and `abi/cc_test.odin` fail if the C headers and Odin declarations disagree.
 
 ## Why a neutral package
 
@@ -37,9 +39,11 @@ This package itself must remain neutral:
 
 ## Provenance and licensing
 
-Milestone 1 will vendor or generate declarations from the official CLAP headers
-(MIT licensed). Keep the upstream version, commit/tag, and license text with the
-declarations. Do not hand-edit ABI layouts without recording the source.
+CLAP 1.2.10 headers are vendored under `vendor/` (MIT; tag and commit in
+`UPSTREAM.md`, per-file SHA-256 in `vendor/VENDORED.sha256`). The Odin
+declarations are hand-written against that subset. Do not hand-edit ABI layouts
+without recording the source, and rerun the C layout/calling-convention probes
+under `tools/abi/`.
 
 ## Future extraction
 
