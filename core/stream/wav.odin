@@ -7,9 +7,12 @@
 //   - WAVE_FORMAT_EXTENSIBLE whose sub-format is PCM or IEEE float and whose
 //     valid bits equal the container bits
 //
-// Output is always interleaved f32 frames. Decoding allocates exactly one
-// sample buffer whose size is proportional to the file's frame count; nothing
-// is buffered beyond the decoded audio.
+// Output is always interleaved f32 frames. The current decoder materializes the
+// entire decoded buffer, and `wav_load_file` reads the entire file first:
+// memory is O(file duration) in both input and output. This is a Milestone-0
+// convenience, not a streaming decoder. Bounded-window/streaming decode is
+// REMAINING WORK for long-file replay (#123); that issue's memory-independence
+// requirement is not yet solved. See docs/architecture.md, "Remaining work".
 //
 // Strictness is deliberate: malformed headers, inconsistent block alignment /
 // byte rate, data before fmt, duplicate fmt/data chunks, unsupported encodings
@@ -40,8 +43,9 @@ wav_audio_destroy :: proc(audio: ^Wav_Audio) {
 	audio^ = {}
 }
 
-// wav_decode decodes a complete RIFF/WAVE byte buffer. `epoch` is stamped into
-// the returned descriptor.
+// wav_decode decodes a complete RIFF/WAVE byte buffer into one fully
+// materialized f32 buffer (O(frames)), not a streaming window. `epoch` is
+// stamped into the returned descriptor.
 wav_decode :: proc(
 	data: []byte,
 	epoch: u64 = 0,

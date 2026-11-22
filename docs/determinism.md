@@ -61,6 +61,18 @@ tolerances below. Windows that do not align are a different measurement by
 definition. The analysis API never invents window boundaries from block
 boundaries.
 
+## Transport continuity
+
+The transport ring enforces the absolute sample clock instead of treating queue
+adjacency as stream adjacency. A producer jump records an explicit lost frame
+range plus a continuity segment and advances the clock; a resubmitted or
+backward range is rejected as a duplicate. Analysis may combine blocks only
+while their continuity segment matches. A gap, a sticky overrun or a ledger
+overflow invalidates sample-complete measurement windows until an explicit
+reset or gap accounting, so a gap can never be rendered as a valid quiet
+interval. Block sizes may vary (subject to the configured maximum) without
+changing the absolute frame assignment of any sample.
+
 ## Numerical conventions
 
 ### Sample formats

@@ -44,6 +44,7 @@ here is extracted yet.
 | Stream and transport (`core/stream`, `core/transport`) | DAW engine foundations |
 | Semantic state (future) | shared plugin/project serialization |
 | CLAP adapter (`adapters/clap`, future) | reusable plugin-authoring infrastructure |
+| CLAP ABI (`third_party/clap`, future) | standalone open-source ABI package — only after a real plugin and an independent host both use it |
 | Verification (`verification/`) | independent developer-facing product |
 | Render capsules (future) | reproducibility / incremental rendering |
 | Pulse (`products/pulse`, future) | standalone product |
@@ -60,12 +61,23 @@ here is extracted yet.
 
   `core/` may import Odin `core:` packages and its sibling core packages only.
   It **must not import alicorn, SDL, miniaudio, WASAPI/ALSA/CoreAudio, CLAP,
-  `adapters/`, `products/` or `verification/`.**
+  `third_party/`, `adapters/`, `products/` or `verification/`.**
 - `verification/` — independent verification laboratory. No implementation
-  yet; Milestone 2 follows Milestone 1. It may import core record formats but
-  **must not import `core/dsp`, `adapters/` or `products/`**, and its numerical
-  references must not share Pulse's DSP implementation. See
+  yet; Milestone 2 follows Milestone 1. It may import core record formats and the
+  neutral `third_party/clap` ABI declarations but **must not import `core/dsp`,
+  `adapters/` or `products/`**, and its numerical references must not share
+  Pulse's DSP implementation. Sharing the CLAP protocol declaration is fine;
+  sharing the DSP that computes expected results is not. See
   `verification/AGENTS.md`.
+- `third_party/` — neutral protocol/ABI surface. `third_party/clap` is the home
+  for foreign declarations of the official CLAP headers (Milestone 1; currently
+  a README/AGENTS placeholder with no declarations). It may import Odin `core:`
+  packages and its own subpackages only; it **must not import `core/`,
+  `adapters/`, `products/`, `verification/`, Alicorn or platform audio/UI
+  libraries.** `adapters/`, `verification/` and `products/` may import it. It is
+  the future open-source extraction candidate, but is extracted only after
+  **both** a real plugin (`adapters/clap`) and an independent host
+  (`verification/`) exercise it.
 - `tests/` — integration tests (package `tests`) across the core packages.
 - `tools/` — build, test and boundary harness.
 - `adapters/` — **architectural destination, not created yet.** Platform and
@@ -77,9 +89,9 @@ here is extracted yet.
 - `research/` — **architectural destination, not created yet.** Isolated
   execution research; no product or adapter imports.
 
-`tools/check-boundary.ps1` enforces the `core/` and `verification/` import
-boundaries. See `docs/architecture.md` for the full map and the extraction
-table.
+`tools/check-boundary.ps1` enforces the `core/`, `verification/` and
+`third_party/` import boundaries. See `docs/architecture.md` for the full map and
+the extraction table.
 
 ## Checks
 
