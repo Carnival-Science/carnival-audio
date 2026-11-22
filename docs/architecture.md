@@ -18,10 +18,10 @@ core/dsp          sample peak, windowed RMS, peak hold, FFT, stereo correlation
 core/transport    bounded SPSC block ring, source-clock continuity, snapshots
 tests/            integration tests: partitions, WAV round-trip, memory ceiling
 verification/     A−1 verification laboratory; core record formats + neutral CLAP ABI, no implementation yet
-third_party/clap  neutral CLAP ABI declarations (Milestone 1; no declarations yet)
-tools/            build, test and boundary-check harness
-adapters/         (not created) adapters/clap for M1, adapters/wasapi for M3
-products/         (not created) products/pulse for the standalone app
+third_party/clap  neutral CLAP 1.2.10 ABI declarations + vendored headers/C probes
+adapters/clap     CLAP lifecycle/params/state adapter (M1)
+adapters/         future adapters/wasapi capture (M3)
+products/pulse    Pulse headless CLAP meter (M1); standalone app/editor later
 research/         (not created) isolated execution research
 ```
 
@@ -148,16 +148,29 @@ as solved guarantees:
   memory is O(file duration) in both input and output. Issue #123's
   memory-independence requirement for long-file replay is **not yet solved**; a
   bounded-window/streaming decoder is remaining work.
-- **Cross-platform reproducibility unproven.** Determinism evidence comes from
-  Windows x86-64 with the pinned Odin nightly. There is no CI or golden evidence
-  for Linux, macOS, ARM or another compiler build, so floating-point and
-  toolchain variance across platforms is not established.
+- **Cross-platform reproducibility unproven (CI added, evidence still
+  Windows-only).** `.github/workflows/ci.yml` now compiles and tests on Windows,
+  Ubuntu and macOS with Odin `dev-2026-11a`, but CI gates compile+test pass; it
+  does not compare measurement records across OS/CPU/libm. Determinism evidence
+  remains Windows x86-64, so floating-point/toolchain variance is not
+  established and cross-OS goldens are still remaining work.
 - **Snapshot record extraction.** Move `Measurement_Snapshot` into a small core
   records package before verification consumes it, so verification links the
   format without the transport ring implementation.
-- **CLAP ABI declarations.** `third_party/clap` is a neutral, empty scope until
-  Milestone 1 adds declarations generated from the official headers. Extraction
-  is deferred until both a real plugin and an independent host use it.
+- **CLAP ABI declarations (done for M1).** `third_party/clap` now pins CLAP
+  1.2.10 headers and Odin declarations, with independent C size/offsetof and
+  calling-convention probes. The package remains in-repo: extraction is deferred
+  until both a real plugin (`adapters/clap`, done) and an independent host
+  (`verification/`, not done) exercise it.
+- **CLAP fuzz denormal policy gap.** clap-validator's fuzzer rejects subnormal
+  output; bit-exact passthrough intentionally preserves subnormal input. This is
+  recorded in
+  `docs/benchmarks/clap-milestone1-validation-2026-11-22/README.md` rather than
+  hidden by flushing samples.
+- **Reproducible plugin artifacts unproven.** Consecutive Odin DLL builds of the
+  same source produce different PE bytes (timestamps). Evidence records the
+  SHA-256 of the exact validated artifact; bit-reproducible builds are remaining
+  work.
 
 ## State separation
 
@@ -171,12 +184,23 @@ Three kinds of state are deliberately distinct:
 3. **Presentation state** — immutable revisioned snapshots and bounded
    visualisation history. Latest-wins; may be dropped or coalesced freely.
 
-Milestone 0 implements processing state and the snapshot seam. It deliberately
-contains no authoring state yet.
+Milestone 0 implements processing state and the snapshot seam. Milestone 1 adds
+parameter authoring state (stable IDs, schema version 2, one v1→v2 migration)
+inside `adapters/clap`, while `products/pulse` keeps clocks, windows,
+accumulators, holds, validity latches and canonical records in processing state.
 
 ## Milestone 0 scope
 
 Pure Odin, headless, deterministic. No SDL, no CLAP, no miniaudio, no Alicorn.
-The next milestone (#237) adds CLAP declarations and a headless plugin around
-this core in `adapters/clap`; the core API must not change shape to accommodate
-the host.
+The core API did not change shape to accommodate the host.
+
+## Milestone 1 scope
+
+`third_party/clap/abi` declares CLAP 1.2.10 and is proven against the official
+C headers by independent sizeof/offsetof and calling-convention probes.
+`adapters/clap` implements the protocol lifecycle, parameter atomics/events and
+authoring state. `products/pulse` implements the headless Windows `.clap`
+meter backend: bit-exact stereo passthrough, explicit invalid state on
+ring/queue loss, canonical record export and a presentation snapshot. Details,
+commands and evidence are in `docs/clap-plugin.md` and
+`docs/benchmarks/clap-milestone1-validation-2026-11-22/`.

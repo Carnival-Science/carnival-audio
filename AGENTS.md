@@ -69,29 +69,31 @@ here is extracted yet.
   Pulse's DSP implementation. Sharing the CLAP protocol declaration is fine;
   sharing the DSP that computes expected results is not. See
   `verification/AGENTS.md`.
-- `third_party/` — neutral protocol/ABI surface. `third_party/clap` is the home
-  for foreign declarations of the official CLAP headers (Milestone 1; currently
-  a README/AGENTS placeholder with no declarations). It may import Odin `core:`
-  packages and its own subpackages only; it **must not import `core/`,
-  `adapters/`, `products/`, `verification/`, Alicorn or platform audio/UI
-  libraries.** `adapters/`, `verification/` and `products/` may import it. It is
-  the future open-source extraction candidate, but is extracted only after
-  **both** a real plugin (`adapters/clap`) and an independent host
-  (`verification/`) exercise it.
+- `third_party/` — neutral protocol/ABI surface. `third_party/clap` holds the
+  CLAP 1.2.10 foreign declarations, the vendored MIT header subset and the C
+  ABI proof probes. It may import Odin `core:` packages and its own subpackages
+  only; it **must not import `core/`, `adapters/`, `products/`, `verification/`,
+  Alicorn or platform audio/UI libraries.** `adapters/`, `verification/` and
+  `products/` may import it. It is the future open-source extraction candidate,
+  but is extracted only after **both** a real plugin (`adapters/clap`) and an
+  independent host (`verification/`) exercise it.
 - `tests/` — integration tests (package `tests`) across the core packages.
-- `tools/` — build, test and boundary harness.
-- `adapters/` — **architectural destination, not created yet.** Platform and
-  host adapters: `adapters/wasapi` capture when Milestone 3 starts,
-  `adapters/clap` for Milestone 1. May import `core/`; never imported by it.
-- `products/` — **architectural destination, not created yet.**
-  `products/pulse` is the standalone application and the only place that
-  imports Alicorn.
+- `tools/` — build, test, ABI-probe and boundary harness.
+- `adapters/` — platform and host adapters. `adapters/clap` (Milestone 1)
+  implements the generic CLAP lifecycle/params/state adapter; `adapters/wasapi`
+  capture starts in Milestone 3. May import `core/` and `third_party/clap`; never
+  imported by core/ or products-owned code except through the documented
+  direction.
+- `products/` — `products/pulse` currently implements the headless CLAP meter
+  backend and entry point; the standalone application/editor (`#131`) follows.
+  It may import `adapters/`, `core/` and `third_party/clap`; only the future
+  standalone/editor target may import Alicorn.
 - `research/` — **architectural destination, not created yet.** Isolated
   execution research; no product or adapter imports.
 
-`tools/check-boundary.ps1` enforces the `core/`, `verification/` and
-`third_party/` import boundaries. See `docs/architecture.md` for the full map and
-the extraction table.
+`tools/check-boundary.ps1` enforces the `core/`, `verification/`,
+`third_party/`, `adapters/` and `products/` import boundaries. See
+`docs/architecture.md` for the full map and the extraction table.
 
 ## Checks
 

@@ -48,15 +48,18 @@ products, so it cannot validate Pulse with Pulse's own math.
 | `core/stream` | `stream` | Stream descriptor, sample clock, WAV replay, generated signals | implemented (M0) |
 | `core/dsp` | `dsp` | Sample peak, windowed RMS, peak hold, FFT, correlation | implemented (M0) |
 | `core/transport` | `transport` | Bounded SPSC block ring, revisioned snapshots | implemented (M0) |
+| `third_party/clap` | `clap` | Pinned CLAP 1.2.10 ABI declarations + vendored headers | implemented (M1) |
+| `adapters/clap` | `clap_adapter` | Generic CLAP lifecycle, params, state extensions | implemented (M1) |
+| `products/pulse` | `pulse` | Pulse headless CLAP meter backend | implemented (M1) |
 | `tests` | `tests` | Integration tests: partitions, WAV round-trip, memory ceiling | implemented (M0) |
 | `verification` | — | Independent A−1 measurement-record verification | planned (M2) |
-| `adapters` | — | CLAP (M1) and WASAPI capture (M3) adapters | destination only |
-| `products` | — | `products/pulse` standalone meter and editor | destination only |
-| `research` | — | Isolated execution research | destination only |
+| `adapters` | `clap_adapter` | CLAP lifecycle adapter (M1); WASAPI capture (M3) | `adapters/clap` implemented (M1) |
+| `products` | `pulse` | Pulse meter (M1); standalone app and editor (M3) | headless CLAP meter implemented (M1) |
+| `research` | - | Isolated execution research | destination only |
 
-`adapters/`, `products/` and `research/` do not exist yet. They are recorded in
-[docs/architecture.md](docs/architecture.md) as architectural destinations so
-the current layout points at the founder's extraction plan.
+`adapters/clap` and `products/pulse` now exist for Milestone 1; `research/` and
+the standalone/editor products remain architectural destinations recorded in
+[docs/architecture.md](docs/architecture.md).
 
 ## Documentation
 
@@ -64,32 +67,43 @@ the current layout points at the founder's extraction plan.
   architectural destinations, future-extraction table, state separation.
 - [Determinism policy](docs/determinism.md) — FMA/FTZ policy, measurement
   conventions, tolerances, partition invariance.
-- [Verification](verification/README.md) — A−1 thesis, method stance,
+- [Headless CLAP meter](docs/clap-plugin.md) — build, ABI proof, lifecycle,
+  params/state schema, measurement export, RT evidence and limits.
+- [Milestone 1 validation](docs/benchmarks/clap-milestone1-validation-2026-11-22/README.md)
+  — pinned clap-validator/clap-trap/clap-info results.
+- [Verification](verification/README.md) — A‑1 thesis, method stance,
   independence rule.
 - [Program research audit](docs/research/program-audit-2026-11-22.md) —
   ecosystem findings, reuse-vs-build decisions, risk register.
 
 ## Build and test
 
-Milestone 0 is a library plus headless tests; there is no executable yet.
-From the repository root (Windows PowerShell):
+From the repository root:
 
 ```powershell
-.\tools\check-boundary.ps1   # core/ and verification/ import boundaries
-.\tools\build.ps1            # odin check every package with -vet
-.\tools\test.ps1             # boundary gate + every package's @(test)s
+.\tools\check-boundary.ps1   # core/, third_party/, adapters/, products/ boundaries
+.\tools\build.ps1            # odin check every package, then build out\pulse.clap
+.\tools\test.ps1             # boundary gate + C ABI probes + every package's tests
+```
+
+```sh
+./tools/test.sh              # same gates on Linux/macOS (requires pwsh for the boundary gate)
 ```
 
 The tools resolve Odin from `-Odin`, `PULSE_ODIN`, the local development path,
 or `PATH`. Packages import each other through the `carnival` collection, which
-the scripts point at the repository root (`-collection:carnival=.`).
+the scripts point at the repository root (`-collection:carnival=.`). CI pins
+Odin `dev-2026-11a`; cross-platform numeric reproducibility of measurement
+records is not yet claimed.
 
 ## Status
 
 - Milestone 0 (source-independent audio analysis core): implemented
   (`core/stream`, `core/dsp`, `core/transport`, headless integration tests).
-- Milestone 1 (headless CLAP meter, Carnival-Science/Alicorn#237): not started.
-- Milestone 2 (verification laboratory A−1, #236): not started;
+- Milestone 1 (headless CLAP meter, Carnival-Science/Alicorn#237): implemented
+  (`third_party/clap` ABI + C proof, `adapters/clap`, `products/pulse` Windows
+  `.clap`). External validation and known gaps in `docs/benchmarks/`.
+- Milestone 2 (verification laboratory A‑1, #236): not started;
   `verification/` is prepared but has no implementation.
 - Milestone 3 (standalone Mini meter + embedded CLAP editor, #131): not
   started.

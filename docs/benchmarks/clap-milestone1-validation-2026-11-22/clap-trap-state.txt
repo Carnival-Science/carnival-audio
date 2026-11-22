@@ -1,0 +1,6 @@
+Plugin: Pulse Meter
+Testing state round-trip...
+  Saved state: 64 bytes
+  Captured 4 parameter values
+  Restored state
+  All 4 parameters match after restore

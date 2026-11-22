@@ -138,6 +138,10 @@ fingerprint over canonical field bytes (not struct padding). Cross-process
 reruns are not required for M0; the golden literals plus the in-process rerun
 provide the regression signal.
 
+Milestone 1 CI (`.github/workflows/ci.yml`) runs these checks on Windows, Linux
+and macOS, but it does **not** compare records across operating systems. No
+cross-OS bit-identical claim is made.
+
 ## Memory
 
 Initialisation may allocate (plans, ring storage, decoded WAV buffers).

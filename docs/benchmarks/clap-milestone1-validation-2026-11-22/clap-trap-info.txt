@@ -1,0 +1,32 @@
+Plugin file: C:\Users\saman\dev\pulse\out\pulse.clap
+Plugins: 1
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Plugin 0: Pulse Meter
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  ID:          com.carnival-science.pulse.meter
+  Vendor:      Carnival Science
+  Version:     0.1.0
+  URL:         https://carnival.science/
+  Manual URL:  
+  Support URL: https://carnival.science/
+  Description: Headless stereo sample peak, RMS and peak-hold meter
+  Features:    audio-effect, analyzer, stereo
+
+  Audio Ports:
+    [IN 0]  Input                2 ch
+    [OUT 0] Output               2 ch
+
+  Parameters: 4
+    [0] Window Frames                  id=1001     range=[128.00, 8192.00] default=1024.00 current=1024.00
+    [1] Hold Frames                    id=1002     range=[0.00, 96000.00] default=4800.00 current=4800.00
+    [2] Hold Decay                     id=1003     range=[0.00, 1.00] default=1.00 current=1.00
+    [3] Hold Decay Rate                id=1004     range=[0.00, 120.00] default=20.00 current=20.00
+
+  Extensions:
+    ✓ clap.params
+    ✓ clap.audio-ports
+    ✓ clap.latency
+    ✓ clap.state
+    ✓ clap.tail
+
