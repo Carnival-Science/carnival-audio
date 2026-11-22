@@ -11,12 +11,16 @@ is recorded below, together with the explicit gap.
 | --- | --- |
 | Path | `out/pulse.clap` |
 | Size | 618,496 bytes |
-| SHA-256 | `ea7a4fe60a0b423902b10c4e0f47ef3c7861b6daa8fd3b3d29c5d7c36a871568` |
+| SHA-256 (census pass) | `ea7a4fe60a0b423902b10c4e0f47ef3c7861b6daa8fd3b3d29c5d7c36a871568` |
+| SHA-256 (later source-identical rebuild) | `5838e6c45288b9c3da2ed87786030a71711ade125a8f762f69cd18cde4f08219` |
 | Build | `.\tools\build.ps1`, Odin `dev-2026-11-nightly:08539cd` |
 | Plugin id / version | `com.carnival-science.pulse.meter` / `0.1.0` |
 
 As in Milestone 1, consecutive Odin DLL builds are not byte-reproducible, so
-this hash names the exact binary this pass exercised, not a reproducible build.
+these hashes name exact binaries, not a reproducible build. The two hashes
+above are the same source built twice (the later rebuild includes only an
+unrelated capture-adapter cleanup), which is the reproducibility gap already in
+the ledger.
 
 ## What changed in the standard CLAP surface
 
