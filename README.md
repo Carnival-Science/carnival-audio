@@ -87,6 +87,9 @@ destinations recorded in [docs/architecture.md](docs/architecture.md).
   records through the real plugin binary.
 - [Milestone 1 validation](docs/benchmarks/clap-milestone1-validation-2026-11-22/README.md)
   — pinned clap-validator/clap-trap/clap-info results.
+- [M3 revalidation](docs/benchmarks/clap-m3-revalidation-2026-11-22/README.md) —
+  rebuilt `.clap` hash, independent-host regression and the explicit
+  external-tool gap.
 - [Verification](verification/README.md) — A‑1 laboratory map, run command,
   scenario/evidence formats, probe classes, independence rule and census.
 - [Program research audit](docs/research/program-audit-2026-11-22.md) —
