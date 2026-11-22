@@ -58,6 +58,23 @@ if ($LASTEXITCODE -ne 0) {
 }
 Write-Host "build: plugin ok"
 
+# Standalone Mini meter (Milestone 3.1): loopback capture -> meter engine ->
+# console snapshots. It is an ordinary exe, not a CLAP bundle.
+$miniPath = Join-Path $repoRoot 'out\pulse-mini.exe'
+Write-Host "check products/pulse-mini"
+& $Odin check (Join-Path $repoRoot 'products\pulse-mini') "-collection:carnival=$repoRoot" `
+    -vet -warnings-as-errors -no-entry-point
+if ($LASTEXITCODE -ne 0) {
+    exit $LASTEXITCODE
+}
+Write-Host "build pulse-mini $miniPath"
+& $Odin build (Join-Path $repoRoot 'products\pulse-mini') "-collection:carnival=$repoRoot" `
+    -out:$miniPath -o:minimal
+if ($LASTEXITCODE -ne 0) {
+    exit $LASTEXITCODE
+}
+Write-Host "build: pulse-mini ok"
+
 # Reference processors and the verification worker. Building them here keeps a
 # single entry point for a local laboratory run.
 & "$PSScriptRoot\build_reference.ps1" -Odin $Odin
