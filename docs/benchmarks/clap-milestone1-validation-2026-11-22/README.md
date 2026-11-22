@@ -203,6 +203,10 @@ and parameter/port metadata through a second host implementation.
 
 ## Gaps recorded
 
+- **CI has not executed on hosted runners.** The push triggered the workflow,
+  but GitHub refused to start all three matrix jobs with an account
+  billing/spending-limit message. The local evidence above is Windows x64; see
+  `.github/workflows/ci.yml` for the operator note and the exact matrix.
 - No macOS/Linux `.clap` artifact is released; CI compiles and tests those
   targets only.
 - clap-validator fuzz has the documented subnormal-passthrough incompatibility.

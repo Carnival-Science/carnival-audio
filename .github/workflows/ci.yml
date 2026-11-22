@@ -19,6 +19,12 @@
 #
 # No secrets are used, so the workflow runs on push and pull_request once
 # Actions is enabled for the repository.
+#
+# Execution note (2026-11-22): the first push triggered this workflow, but
+# GitHub refused to start all three jobs with "recent account payments have
+# failed or your spending limit needs to be increased". The workflow definition
+# has therefore not yet executed on hosted runners; local Windows evidence is
+# in docs/benchmarks/clap-milestone1-validation-2026-11-22/.
 name: ci
 
 on:
