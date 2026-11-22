@@ -7,10 +7,16 @@ Artifact validated:
 
 | Item | Value |
 | --- | --- |
-| Path | `out/pulse.clap` |
+| Path (at validation time) | `out/pulse.clap` |
+| Preserved copy | [`artifacts/pulse-meter-m1.clap`](artifacts/pulse-meter-m1.clap) |
 | Plugin ID | `com.carnival-science.pulse.meter` |
 | Size | 608,768 bytes |
 | SHA-256 | `cbc7b516210257519bb05787f32d5a6e70c51b470bf037b0e71b73a3eea5afd7` |
+
+The exact validated binary is committed under `artifacts/` because Odin DLL
+builds are not byte-reproducible. `artifacts/MANIFEST.md` records the hash,
+source revision `14041ad` and tool versions. Treat it as immutable historical
+evidence: do not rebuild over it.
 
 Build command:
 

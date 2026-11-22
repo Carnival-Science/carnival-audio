@@ -1,0 +1,3 @@
+# Plugin binaries are opaque build artifacts: never apply text conversion.
+*.clap binary
+*.dll binary
