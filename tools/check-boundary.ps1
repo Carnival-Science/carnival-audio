@@ -45,6 +45,18 @@ $scopes = @(
         Root    = Join-Path $repoRoot 'third_party'
         Pattern = '(?im)' + $importPrefix + '(?:alicorn[^"]*|vendor:(?:sdl3|miniaudio|wasapi|alsa|coreaudio)[^"]*|(?:carnival:)?(?:core|adapters|products|verification)/[^"]*)"'
         Reason  = 'third_party/ is neutral ABI surface: it must not import core/, adapters/, products/, verification/ or platform UI/audio libraries.'
+    },
+    @{
+        Name    = 'adapters'
+        Root    = Join-Path $repoRoot 'adapters'
+        Pattern = '(?im)' + $importPrefix + '(?:alicorn[^"]*|vendor:(?:sdl3|miniaudio|wasapi|alsa|coreaudio)[^"]*|(?:carnival:)?(?:products|verification)/[^"]*)"'
+        Reason  = 'adapters/ may import core/ and third_party/clap; it must not import products/, verification/, Alicorn or a platform UI/audio backend.'
+    },
+    @{
+        Name    = 'products'
+        Root    = Join-Path $repoRoot 'products'
+        Pattern = '(?im)' + $importPrefix + '(?:alicorn[^"]*|vendor:(?:sdl3|miniaudio|wasapi|alsa|coreaudio)[^"]*|(?:carnival:)?verification/[^"]*)"'
+        Reason  = 'headless products/ may import adapters/, core/ and third_party/clap; this milestone must not import verification/, Alicorn or a platform UI/audio backend. (Alicorn becomes allowed only for the standalone/editor product in Milestone 3.)'
     }
 )
 
@@ -52,7 +64,9 @@ $counts = @()
 $failed = $false
 foreach ($scope in $scopes) {
     if (-not (Test-Path -LiteralPath $scope.Root -PathType Container)) {
-        throw "$($scope.Name)/ not found at '$($scope.Root)'."
+        # Stacked milestone commits may not have created every optional layer
+        # yet; the gate applies as soon as the directory exists.
+        continue
     }
     $files = @(Get-ChildItem -LiteralPath $scope.Root -Recurse -File -Filter '*.odin')
     $found = @()

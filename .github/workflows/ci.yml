@@ -1,0 +1,110 @@
+# Portable headless CI for carnival-audio.
+#
+# Scope (deliberately modest):
+#   - compiles and tests core/, the neutral third_party/clap ABI, adapters/clap,
+#     products/pulse and the integration tests on Windows, Ubuntu and macOS;
+#   - builds the independent C ABI probes with the platform C compiler and
+#     compares C sizeof/offsetof + CLAP function-pointer calls against the Odin
+#     declarations (tests/abi_*);
+#   - builds the Windows .clap DLL and proves it exports `clap_entry`.
+#
+# NOT claimed by this workflow:
+#   - numeric reproducibility of measurement records across operating systems.
+#     No cross-OS golden evidence exists yet; that remains in the remaining-work
+#     ledger (docs/architecture.md) and docs/determinism.md. These jobs gate
+#     compile + test pass, not bit-identical records across OS/CPU/libm.
+#   - external clap-validator/clap-trap runs. Those are pinned and run outside
+#     the repository; evidence is recorded in
+#     docs/benchmarks/clap-milestone1-validation-2026-11-22/.
+#
+# No secrets are used, so the workflow runs on push and pull_request once
+# Actions is enabled for the repository.
+name: ci
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  headless:
+    name: headless (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest, macos-latest]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Odin is pinned to the official dev-2026-11a release (2026-11-03,
+      # tag 9a6991685ddf663956d9836602eb421e141fc443). The local development
+      # compiler is dev-2026-11-nightly:08539cd; the release build is the
+      # closest official asset. Tests use closed-form literals and tolerances,
+      # not byte-identical cross-build goldens.
+      - name: Install Odin (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $url = 'https://github.com/odin-lang/Odin/releases/download/dev-2026-11a/odin-windows-amd64-dev-2026-11a.zip'
+          $archive = Join-Path $env:RUNNER_TEMP 'odin.zip'
+          Invoke-WebRequest -Uri $url -OutFile $archive
+          $dest = Join-Path $env:RUNNER_TEMP 'odin'
+          Expand-Archive -LiteralPath $archive -DestinationPath $dest
+          $exe = Get-ChildItem -LiteralPath $dest -Recurse -Filter 'odin.exe' -File | Select-Object -First 1
+          if (-not $exe) { throw 'odin.exe not found in release archive' }
+          $exe.DirectoryName | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+          & $exe.FullName version
+
+      - name: Install Odin (Unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          case "${{ runner.os }}" in
+            Linux) asset=odin-linux-amd64-dev-2026-11a.tar.gz ;;
+            macOS) asset=odin-macos-arm64-dev-2026-11a.tar.gz ;;
+            *) echo "unsupported runner" >&2; exit 1 ;;
+          esac
+          url="https://github.com/odin-lang/Odin/releases/download/dev-2026-11a/$asset"
+          archive="$RUNNER_TEMP/odin.tar.gz"
+          curl -fsSL "$url" -o "$archive"
+          dest="$RUNNER_TEMP/odin"
+          mkdir -p "$dest"
+          tar -xzf "$archive" -C "$dest"
+          exe=$(find "$dest" -type f -name odin | head -n 1)
+          if [ -z "$exe" ]; then echo 'odin binary not found in release archive' >&2; exit 1; fi
+          chmod +x "$exe"
+          dirname "$exe" >> "$GITHUB_PATH"
+          "$exe" version
+
+      - name: Test (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: .\tools\test.ps1
+
+      - name: Test (Unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: ./tools/test.sh
+
+      # Prove the DSO entry point on the first target. tools/build.ps1 compiles
+      # products/pulse with -define:PULSE_PLUGIN_BUILD=true and writes
+      # out/pulse.clap.
+      - name: Build Windows .clap
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: .\tools\build.ps1
+
+      - name: Upload Windows .clap
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: pulse-clap-windows
+          path: out/pulse.clap
+          if-no-files-found: error

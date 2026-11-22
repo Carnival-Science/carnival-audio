@@ -50,10 +50,19 @@ function Get-PulseRepoRoot {
 }
 
 function Get-PulsePackages {
-    return @(
+    $packages = @(
         'core/stream',
         'core/dsp',
         'core/transport',
         'tests'
     )
+    # Optional layers exist only after their milestone commit. Keeping the
+    # discovery dynamic lets the CI harness land before those packages without
+    # a dead path in the package list.
+    foreach ($optional in @('third_party/clap/abi', 'adapters/clap', 'products/pulse')) {
+        if (Test-Path -LiteralPath (Join-Path (Get-PulseRepoRoot) $optional) -PathType Container) {
+            $packages += $optional
+        }
+    }
+    return $packages
 }
