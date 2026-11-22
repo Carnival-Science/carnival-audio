@@ -12,7 +12,11 @@
 - **pluginval** (reference only): GPL-3.0 — external CI binary only; never
   linked, embedded, or redistributed with Pulse. CLAP coverage comes from
   clap-validator and clap-trap instead.
-- **miniaudio** (planned, standalone capture): public domain.
+- **miniaudio** (Milestone 3 capture): public domain (Unlicense) or MIT No
+  Attribution, at the user's choice �?" https://github.com/mackron/miniaudio.
+  Version 0.11.26; the single-file header is vendored (verbatim, with its
+  license statement) in `third_party/miniaudio/`, provenance and SHA-256 in
+  `third_party/miniaudio/UPSTREAM.md`.
 - **FFTW**: GPL — deliberately NOT used anywhere in Pulse. The analysis FFT is
   implemented in pure Odin; independent verification uses external offline
   references (e.g. numpy) that are never distributed with Pulse.

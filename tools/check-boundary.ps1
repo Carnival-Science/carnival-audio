@@ -49,8 +49,8 @@ $scopes = @(
     @{
         Name    = 'adapters'
         Root    = Join-Path $repoRoot 'adapters'
-        Pattern = '(?im)' + $importPrefix + '(?:alicorn[^"]*|vendor:(?:sdl3|miniaudio|wasapi|alsa|coreaudio)[^"]*|(?:carnival:)?(?:products|verification)/[^"]*)"'
-        Reason  = 'adapters/ may import core/ and third_party/clap; it must not import products/, verification/, Alicorn or a platform UI/audio backend.'
+        Pattern = '(?im)' + $importPrefix + '(?:alicorn[^"]*|vendor:(?:sdl3|wasapi|alsa|coreaudio)[^"]*|(?:carnival:)?(?:products|verification)/[^"]*)"'
+        Reason  = 'adapters/ may import core/, third_party/clap and vendor:miniaudio (the platform capture backend); it must not import products/, verification/, Alicorn or another UI/audio backend.'
     },
     @{
         Name    = 'products'

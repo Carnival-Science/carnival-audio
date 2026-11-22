@@ -47,8 +47,8 @@ if [ -f "$root/tools/abi/build.sh" ]; then
     export PULSE_CLAP_ABI_PROBE="$root/out/abi/abi_probe.txt"
 fi
 
-packages="core/stream core/dsp core/transport tests"
-for optional in third_party/clap/abi adapters/clap products/pulse; do
+packages="core/stream core/dsp core/transport core/meter tests"
+for optional in third_party/clap/abi adapters/clap adapters/wasapi products/pulse; do
     if [ -d "$root/$optional" ]; then
         packages="$packages $optional"
     fi
