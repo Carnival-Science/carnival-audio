@@ -21,6 +21,7 @@
 #include <stdint.h>
 
 #include "clap/plugin.h"
+#include "clap/stream.h"
 
 #define CARNIVAL_EXT_TELEMETRY_CAPTURE_DRAFT "com.carnival-science.telemetry-capture.draft/1"
 
@@ -62,5 +63,28 @@ typedef struct clap_carnival_telemetry_capture {
    bool (*valid)(const clap_plugin_t *plugin);
    uint32_t (*schema_version)(const clap_plugin_t *plugin);
 } clap_carnival_telemetry_capture_t;
+
+// ---------------------------------------------------------------------------
+// Draft: Carnival processing-checkpoint extension (separate capability)
+// ---------------------------------------------------------------------------
+//
+// Authoring state (clap.state) reopens a project with the same settings. A
+// processing checkpoint resumes computation at an exact sample position. This
+// extension is optional: call `supported()` first. A host must not treat an
+// authoring state that omits a delay line as a defect; that omission is only a
+// defect of this checkpoint capability, and only when `supported()` is true.
+#define CARNIVAL_EXT_PROCESSING_CHECKPOINT_DRAFT "com.carnival-science.processing-checkpoint.draft/1"
+
+#define CARNIVAL_CHECKPOINT_DRAFT_UUID                                                             \
+   { 0x5C, 0x2F, 0x0A, 0x7E, 0x4B, 0x1D, 0x4C, 0x8E, 0x9F, 0x3A, 0x7D, 0x6E, 0x2B, 0x1C, 0x0A, 0x95 }
+
+#define CARNIVAL_CHECKPOINT_SCHEMA_VERSION 1u
+
+typedef struct clap_carnival_processing_checkpoint {
+   bool (*supported)(const clap_plugin_t *plugin);
+   bool (*save)(const clap_plugin_t *plugin, clap_ostream_t *stream);
+   bool (*load)(const clap_plugin_t *plugin, clap_istream_t *stream);
+   uint32_t (*schema_version)(const clap_plugin_t *plugin);
+} clap_carnival_processing_checkpoint_t;
 
 #endif // CLAP_CARNIVAL_TELEMETRY_CAPTURE_DRAFT_H

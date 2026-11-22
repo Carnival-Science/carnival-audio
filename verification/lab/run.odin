@@ -12,6 +12,7 @@ run_probes :: proc(ctx: ^Run_Context) {
 		case "partition":        builder = probe_partition(ctx)
 		case "automation":       builder = probe_automation(ctx)
 		case "state":            builder = probe_state(ctx)
+		case "checkpoint":       builder = probe_checkpoint(ctx)
 		case "isolation":        builder = probe_isolation(ctx)
 		case "reset":            builder = probe_reset(ctx)
 		case "tail":             builder = probe_tail(ctx)

@@ -146,6 +146,7 @@
     "partition",
     "automation",
     "state",
+    "checkpoint",
     "isolation",
     "reset",
     "tail",

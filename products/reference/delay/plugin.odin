@@ -8,8 +8,10 @@
 // invariant: the same absolute sample performs the same f32 read, write,
 // multiply and add regardless of host block boundaries.
 //
-// Processing state (write cursor and both delay lines) is included in the
-// schema-4 state blob, so a save/load restore continues the same tail.
+// Processing state (write cursor and both delay lines) is exposed through the
+// separate draft processing-checkpoint capability, not clap.state. A checkpoint
+// resumes the exact delay tail; authoring state (schema 3) only reopens the
+// parameters.
 package reference_delay
 
 import "base:runtime"
@@ -152,49 +154,103 @@ process :: proc(data: rawptr, request: ^adapter.Process_Request) -> adapter.Proc
 	return .Continue
 }
 
-state_blob_size :: proc(data: rawptr) -> u32 {
-	_ = data
-	return u32(4 + CHANNELS * DELAY_MAX_FRAMES * 4)
-}
+// ---------------------------------------------------------------------------
+// Processing checkpoint (draft extension; separate from clap.state)
+//
+// Payload: magic "CSDLCK01" | u32 version | u32 write_index |
+//          CHANNELS * DELAY_MAX_FRAMES f32 bit patterns (little-endian).
+// ---------------------------------------------------------------------------
 
-state_blob_save :: proc(data: rawptr, stream: ^clap.OStream) -> bool {
+CHECKPOINT_MAGIC: [8]u8 = {'C', 'S', 'D', 'L', 'C', 'K', '0', '1'}
+CHECKPOINT_VERSION :: u32(1)
+CHECKPOINT_SAMPLES :: CHANNELS * DELAY_MAX_FRAMES
+
+checkpoint_save :: proc(data: rawptr, stream: ^clap.OStream) -> bool {
 	state := cast(^State)data
 	if state == nil || stream == nil || stream.write == nil {
 		return false
 	}
-	index_bytes: [4]u8
-	put_u32(index_bytes[:], 0, u32(state.write_index))
-	if stream.write(stream, &index_bytes[0], 4) != 4 {
+	header: [16]u8
+	copy(header[:8], CHECKPOINT_MAGIC[:])
+	put_u32(header[:], 8, CHECKPOINT_VERSION)
+	put_u32(header[:], 12, u32(state.write_index))
+	if !write_all(stream, header[:]) {
 		return false
 	}
+	bits: [CHECKPOINT_SAMPLES]u32
+	position := 0
 	for channel in 0 ..< CHANNELS {
-		bits: [DELAY_MAX_FRAMES]u32
 		for frame in 0 ..< DELAY_MAX_FRAMES {
-			bits[frame] = transmute(u32)state.lines[channel][frame]
+			bits[position] = transmute(u32)state.lines[channel][frame]
+			position += 1
 		}
-		if stream.write(stream, &bits[0], u64(len(bits) * 4)) != i64(len(bits) * 4) {
+	}
+	return write_all(stream, ([^]u8)(&bits[0])[:CHECKPOINT_SAMPLES * 4])
+}
+
+checkpoint_load :: proc(data: rawptr, stream: ^clap.IStream) -> bool {
+	state := cast(^State)data
+	if state == nil || stream == nil || stream.read == nil {
+		return false
+	}
+	header: [16]u8
+	if !read_all(stream, header[:]) {
+		return false
+	}
+	for index in 0 ..< 8 {
+		if header[index] != CHECKPOINT_MAGIC[index] {
 			return false
 		}
+	}
+	if get_u32(header[:], 8) != CHECKPOINT_VERSION {
+		return false
+	}
+	write_index := int(get_u32(header[:], 12))
+	if write_index < 0 || write_index >= DELAY_MAX_FRAMES {
+		return false
+	}
+	// Read into a temporary so a truncated payload leaves the live delay line
+	// untouched (all-or-nothing restore).
+	bits: [CHECKPOINT_SAMPLES]u32
+	if !read_all(stream, ([^]u8)(&bits[0])[:CHECKPOINT_SAMPLES * 4]) {
+		return false
+	}
+	position := 0
+	for channel in 0 ..< CHANNELS {
+		for frame in 0 ..< DELAY_MAX_FRAMES {
+			state.lines[channel][frame] = transmute(f32)bits[position]
+			position += 1
+		}
+	}
+	state.write_index = write_index
+	return true
+}
+
+checkpoint_ops: adapter.Checkpoint_Ops = {
+	save = checkpoint_save,
+	load = checkpoint_load,
+}
+
+write_all :: proc(stream: ^clap.OStream, bytes: []u8) -> bool {
+	written := 0
+	for written < len(bytes) {
+		count := stream.write(stream, raw_data(bytes[written:]), u64(len(bytes) - written))
+		if count <= 0 {
+			return false
+		}
+		written += int(count)
 	}
 	return true
 }
 
-state_blob_load :: proc(data: rawptr, bytes: []u8) -> bool {
-	state := cast(^State)data
-	if state == nil || len(bytes) != 4 + CHANNELS * DELAY_MAX_FRAMES * 4 {
-		return false
-	}
-	state.write_index = int(get_u32(bytes, 0))
-	if state.write_index < 0 || state.write_index >= DELAY_MAX_FRAMES {
-		return false
-	}
-	offset := 4
-	for channel in 0 ..< CHANNELS {
-		for frame in 0 ..< DELAY_MAX_FRAMES {
-			bits := get_u32(bytes, offset)
-			state.lines[channel][frame] = transmute(f32)bits
-			offset += 4
+read_all :: proc(stream: ^clap.IStream, bytes: []u8) -> bool {
+	read := 0
+	for read < len(bytes) {
+		count := stream.read(stream, raw_data(bytes[read:]), u64(len(bytes) - read))
+		if count <= 0 {
+			return false
 		}
+		read += int(count)
 	}
 	return true
 }
@@ -240,10 +296,8 @@ definition: adapter.Definition = {
 	input_port_name = "Input",
 	output_port_name = "Output",
 	state_magic = {'C', 'S', 'D', 'L', 'A', 'Y', '0', '1'},
-	state_schema = 4,
-	state_blob_size = state_blob_size,
-	state_blob_save = state_blob_save,
-	state_blob_load = state_blob_load,
+	state_schema = 3,
+	checkpoint = &checkpoint_ops,
 	tail_frames = tail_frames,
 }
 

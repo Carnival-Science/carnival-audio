@@ -12,8 +12,11 @@
 // is control-rate (coefficients update at block boundaries), which is a
 // distinct class from static partition invariance.
 //
-// Processing state (x1,x2,y1,y2 per channel) is included in the schema-4 state
-// blob so a save/load restore can continue the same output.
+// Processing state (x1,x2,y1,y2 per channel) is a **processing checkpoint**,
+// not authoring state: it resumes the sample-exact filter at the saved
+// position. It is exposed through the separate draft
+// com.carnival-science.processing-checkpoint.draft/1 capability; clap.state
+// stays parameters-only (schema 3).
 package reference_biquad
 
 import "base:runtime"
@@ -168,44 +171,109 @@ process :: proc(data: rawptr, request: ^adapter.Process_Request) -> adapter.Proc
 	return .Continue
 }
 
-state_blob_size :: proc(data: rawptr) -> u32 {
-	_ = data
-	return u32(2 * 4 * 8)
-}
+// ---------------------------------------------------------------------------
+// Processing checkpoint (draft extension; separate from clap.state)
+//
+// Payload: magic "CSBQCK01" | u32 version | 8 * f64 history words.
+// ---------------------------------------------------------------------------
 
-state_blob_save :: proc(data: rawptr, stream: ^clap.OStream) -> bool {
+CHECKPOINT_MAGIC: [8]u8 = {'C', 'S', 'B', 'Q', 'C', 'K', '0', '1'}
+CHECKPOINT_VERSION :: u32(1)
+CHECKPOINT_HISTORY_WORDS :: 8
+
+checkpoint_save :: proc(data: rawptr, stream: ^clap.OStream) -> bool {
 	state := cast(^State)data
 	if state == nil || stream == nil || stream.write == nil {
 		return false
 	}
-	values := [8]f64{
+	bytes: [8 + 4 + CHECKPOINT_HISTORY_WORDS * 8]u8
+	copy(bytes[:8], CHECKPOINT_MAGIC[:])
+	put_u32(bytes[:], 8, CHECKPOINT_VERSION)
+	values := [CHECKPOINT_HISTORY_WORDS]f64{
 		state.x1[0], state.x2[0], state.y1[0], state.y2[0],
 		state.x1[1], state.x2[1], state.y1[1], state.y2[1],
 	}
-	return stream.write(stream, &values[0], u64(len(values) * 8)) == i64(len(values) * 8)
+	for value, index in values {
+		put_f64(bytes[:], 12 + index * 8, value)
+	}
+	return stream.write(stream, &bytes[0], u64(len(bytes))) == i64(len(bytes))
 }
 
-state_blob_load :: proc(data: rawptr, bytes: []u8) -> bool {
+checkpoint_load :: proc(data: rawptr, stream: ^clap.IStream) -> bool {
 	state := cast(^State)data
-	if state == nil || len(bytes) != 2 * 4 * 8 {
+	if state == nil || stream == nil || stream.read == nil {
+		return false
+	}
+	bytes: [8 + 4 + CHECKPOINT_HISTORY_WORDS * 8]u8
+	if !read_all(stream, bytes[:]) {
 		return false
 	}
 	for index in 0 ..< 8 {
-		bits: u64
-		for byte in 0 ..< 8 {
-			bits |= u64(bytes[index * 8 + byte]) << (8 * u64(byte))
+		if bytes[index] != CHECKPOINT_MAGIC[index] {
+			return false
 		}
-		value := transmute(f64)bits
-		switch index {
-		case 0: state.x1[0] = value
-		case 1: state.x2[0] = value
-		case 2: state.y1[0] = value
-		case 3: state.y2[0] = value
-		case 4: state.x1[1] = value
-		case 5: state.x2[1] = value
-		case 6: state.y1[1] = value
-		case 7: state.y2[1] = value
+	}
+	if get_u32(bytes[:], 8) != CHECKPOINT_VERSION {
+		return false
+	}
+	values: [CHECKPOINT_HISTORY_WORDS]f64
+	for index in 0 ..< CHECKPOINT_HISTORY_WORDS {
+		values[index] = get_f64(bytes[:], 12 + index * 8)
+	}
+	// Commit only after the whole payload validated.
+	state.x1[0] = values[0]
+	state.x2[0] = values[1]
+	state.y1[0] = values[2]
+	state.y2[0] = values[3]
+	state.x1[1] = values[4]
+	state.x2[1] = values[5]
+	state.y1[1] = values[6]
+	state.y2[1] = values[7]
+	return true
+}
+
+checkpoint_ops: adapter.Checkpoint_Ops = {
+	save = checkpoint_save,
+	load = checkpoint_load,
+}
+
+put_u32 :: proc(buffer: []u8, offset: int, value: u32) {
+	buffer[offset + 0] = u8(value)
+	buffer[offset + 1] = u8(value >> 8)
+	buffer[offset + 2] = u8(value >> 16)
+	buffer[offset + 3] = u8(value >> 24)
+}
+
+get_u32 :: proc(buffer: []u8, offset: int) -> u32 {
+	return u32(buffer[offset]) |
+		u32(buffer[offset + 1]) << 8 |
+		u32(buffer[offset + 2]) << 16 |
+		u32(buffer[offset + 3]) << 24
+}
+
+put_f64 :: proc(buffer: []u8, offset: int, value: f64) {
+	bits := transmute(u64)value
+	for index in 0 ..< 8 {
+		buffer[offset + index] = u8(bits >> (8 * u64(index)))
+	}
+}
+
+get_f64 :: proc(buffer: []u8, offset: int) -> f64 {
+	bits: u64
+	for index in 0 ..< 8 {
+		bits |= u64(buffer[offset + index]) << (8 * u64(index))
+	}
+	return transmute(f64)bits
+}
+
+read_all :: proc(stream: ^clap.IStream, bytes: []u8) -> bool {
+	read := 0
+	for read < len(bytes) {
+		count := stream.read(stream, raw_data(bytes[read:]), u64(len(bytes) - read))
+		if count <= 0 {
+			return false
 		}
+		read += int(count)
 	}
 	return true
 }
@@ -227,10 +295,8 @@ definition: adapter.Definition = {
 	input_port_name = "Input",
 	output_port_name = "Output",
 	state_magic = {'C', 'S', 'B', 'I', 'Q', 'U', 'A', '1'},
-	state_schema = 4,
-	state_blob_size = state_blob_size,
-	state_blob_save = state_blob_save,
-	state_blob_load = state_blob_load,
+	state_schema = 3,
+	checkpoint = &checkpoint_ops,
 }
 
 // ---------------------------------------------------------------------------

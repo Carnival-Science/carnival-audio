@@ -23,7 +23,6 @@ import clap "carnival:third_party/clap/abi"
 
 MAX_PARAMS :: 32
 MAX_STATE_BYTES :: 4096
-MAX_STATE_BLOB_BYTES :: 4 << 20
 STATE_HEADER_BYTES :: 16
 
 // ---------------------------------------------------------------------------
@@ -115,6 +114,20 @@ Telemetry_Ops :: struct {
 	schema_version: proc(data: rawptr) -> u32,
 }
 
+// Checkpoint_Ops is the product side of the draft Carnival
+// processing-checkpoint capability
+// (clap.CARNIVAL_EXT_PROCESSING_CHECKPOINT_DRAFT). It is **separate from
+// authoring state**: authoring state reopens a project with the same settings,
+// a checkpoint resumes computation at an exact sample position. A product opts
+// in by setting `Definition.checkpoint`; a nil value means `supported()` reports
+// false and the host must not probe further. The product owns the payload
+// framing (magic/version/length) and must validate it before committing.
+// Main thread only, like the state extension.
+Checkpoint_Ops :: struct {
+	save: proc(data: rawptr, stream: ^clap.OStream) -> bool,
+	load: proc(data: rawptr, stream: ^clap.IStream) -> bool,
+}
+
 Definition :: struct {
 	descriptor:      ^clap.Plugin_Descriptor,
 	backend:         ^Backend_VTable,
@@ -132,17 +145,12 @@ Definition :: struct {
 	// state_schema >= 3.
 	state_flags_save: proc(data: rawptr) -> u32,
 	state_flags_load: proc(data: rawptr, flags: u32),
-	// Optional processing-state blob appended to state schema 4 and later.
-	// This is for processors whose output after a state restore must continue
-	// from the saved processing state (for example a delay line or a filter
-	// history). It is not a general DSP-state promise: the plugin owns the
-	// bytes, the adapter only frames them with a length. All three hooks must
-	// be set together, and a definition that sets them must use
-	// state_schema >= 4. Schema 1..3 files load with the processing state at
-	// its fresh (reset) values.
-	state_blob_size: proc(data: rawptr) -> u32,
-	state_blob_save: proc(data: rawptr, stream: ^clap.OStream) -> bool,
-	state_blob_load: proc(data: rawptr, bytes: []u8) -> bool,
+	// Optional processing-checkpoint capability. This is deliberately NOT part
+	// of state_schema: authoring state and processing checkpoints are separate
+	// contracts with separate lifetimes. A definition that sets both hooks
+	// exposes the draft checkpoint extension and reports supported() == true.
+	// Products that cannot snapshot processing state leave this nil.
+	checkpoint: ^Checkpoint_Ops,
 	// Optional declared tail length in frames. The adapter's clap.tail
 	// extension reports this value; a nil hook reports zero.
 	tail_frames: proc(data: rawptr) -> u32,
@@ -170,6 +178,7 @@ Instance :: struct {
 	ext_latency:     clap.Plugin_Latency,
 	ext_tail:        clap.Plugin_Tail,
 	ext_telemetry:   clap.Carnival_Telemetry_Capture,
+	ext_checkpoint:  clap.Carnival_Processing_Checkpoint,
 }
 
 // ---------------------------------------------------------------------------
@@ -259,11 +268,8 @@ factory_create_plugin :: proc "c" (factory: ^clap.Plugin_Factory, host: ^clap.Ho
 		definition.state_schema < 3 {
 		return nil
 	}
-	blob_hooks := 0
-	if definition.state_blob_size != nil { blob_hooks += 1 }
-	if definition.state_blob_save != nil { blob_hooks += 1 }
-	if definition.state_blob_load != nil { blob_hooks += 1 }
-	if blob_hooks != 0 && (blob_hooks != 3 || definition.state_schema < 4) {
+	if definition.checkpoint != nil &&
+		(definition.checkpoint.save == nil || definition.checkpoint.load == nil) {
 		return nil
 	}
 	if definition.backend == nil || definition.backend.create == nil || definition.backend.process == nil {
@@ -328,6 +334,12 @@ factory_create_plugin :: proc "c" (factory: ^clap.Plugin_Factory, host: ^clap.Ho
 			valid = telemetry_valid,
 			schema_version = telemetry_schema_version,
 		}
+	}
+	instance.ext_checkpoint = clap.Carnival_Processing_Checkpoint{
+		supported = checkpoint_ext_supported,
+		save = checkpoint_ext_save,
+		load = checkpoint_ext_load,
+		schema_version = checkpoint_ext_schema_version,
 	}
 	return &instance.plugin
 }
@@ -813,20 +825,24 @@ write_c_string :: proc "c" (buffer: [^]u8, capacity: u32, text: string) {
 //
 // State is authoring state only: stable parameter IDs and values, plus an
 // optional product flag word. Processing state (windows, accumulators, clocks)
-// is never serialized. The format is:
+// is never serialized here. The format is:
 //
 //   magic[8] | u32 schema | u32 param_count | param_count * (u32 id, f64 value)
 //            [| u32 product_flags]        (schema 3+ with a flags hook)
-//            [| u32 blob_length | bytes]  (schema 4+ with blob hooks)
 //
 // Schema 1 contained parameters 1001..1003. Schema 2 adds 1004; loading a v1
 // fixture leaves 1004 at its descriptor default. Schema 3 appends a product
 // flag word (Pulse uses bit 0 for telemetry capture mode); loading a v1/v2
-// fixture leaves the flags at the product default. Schema 4 optionally appends
-// a plugin-owned processing-state blob (reference biquad/delay); loading an
-// older fixture leaves processing state at its fresh values. All fields are
+// fixture leaves the flags at the product default. All fields are
 // native-endian (the supported targets are little-endian); no cross-endian
 // claim is made.
+//
+// Processing state is a different contract: see the draft
+// com.carnival-science.processing-checkpoint.draft/1 extension and
+// `Checkpoint_Ops`. Schema 4 existed in the Milestone 2 preparation and
+// appended a plugin-owned processing blob to this authoring stream; that
+// conflated the two contracts and has been removed. Definitions are back at
+// schema 3 (or lower) and a schema-4 file is rejected by the schema check.
 // ---------------------------------------------------------------------------
 
 @(private)
@@ -862,20 +878,6 @@ state_save :: proc "c" (plugin: ^clap.Plugin, stream: ^clap.OStream) -> bool {
 	}
 	if !write_all(stream, buffer[:offset]) {
 		return false
-	}
-	if definition.state_blob_save != nil {
-		size := definition.state_blob_size(instance.data)
-		if size > MAX_STATE_BLOB_BYTES {
-			return false
-		}
-		header: [4]u8
-		put_u32(header[:], 0, size)
-		if !write_all(stream, header[:]) {
-			return false
-		}
-		if !definition.state_blob_save(instance.data, stream) {
-			return false
-		}
 	}
 	return true
 }
@@ -929,49 +931,12 @@ state_load :: proc "c" (plugin: ^clap.Plugin, stream: ^clap.IStream) -> bool {
 		}
 		flags = get_u32(flag_bytes[:], 0)
 	}
-	blob: []u8
-	if schema >= 4 {
-		// A schema-4 stream carries a processing-state blob. A definition that
-		// implements schema 4 must provide the load hook, and the bytes are
-		// validated before any parameter or state is committed.
-		if definition.state_blob_load == nil {
-			return false
-		}
-		length_bytes: [4]u8
-		if !read_all(stream, length_bytes[:]) {
-			return false
-		}
-		length := get_u32(length_bytes[:], 0)
-		if length > MAX_STATE_BLOB_BYTES {
-			return false
-		}
-		if length > 0 {
-			allocated, err := mem.alloc_bytes(int(length), 1, runtime.default_allocator())
-			if err != .None || allocated == nil {
-				return false
-			}
-			blob = mem.slice_data_cast([]u8, allocated)
-			if !read_all(stream, blob) {
-				mem.free(raw_data(blob), runtime.default_allocator())
-				return false
-			}
-		}
-	}
 	// Commit only after the whole stream has been validated.
 	for _, index in definition.params {
 		sync.atomic_store_explicit(&instance.param_values[index], transmute(u64)values[index], .Release)
 	}
 	if definition.state_flags_load != nil {
 		definition.state_flags_load(instance.data, flags)
-	}
-	if definition.state_blob_load != nil {
-		loaded := definition.state_blob_load(instance.data, blob)
-		if blob != nil {
-			mem.free(raw_data(blob), runtime.default_allocator())
-		}
-		if !loaded {
-			return false
-		}
 	}
 	// CLAP state load is a main-thread authoring operation; tell the host that
 	// cached parameter values changed. Some hosts (and clap-validator) require
@@ -1146,6 +1111,81 @@ telemetry_schema_version :: proc "c" (plugin: ^clap.Plugin) -> u32 {
 }
 
 // ---------------------------------------------------------------------------
+// Draft Carnival processing-checkpoint extension (private, experimental)
+//
+// This is a different contract from clap.state. The extension is always
+// exposed so a host can ask `supported()`; a product that does not implement
+// checkpointing reports false and the host must stop there. Main-thread only,
+// enforced through clap.thread-check when the host offers it.
+// ---------------------------------------------------------------------------
+
+@(private)
+checkpoint_on_main_thread :: proc(instance: ^Instance) -> bool {
+	if instance.host_info.thread_check != nil && instance.host_info.thread_check.is_main_thread != nil {
+		return instance.host_info.thread_check.is_main_thread(instance.host)
+	}
+	return true
+}
+
+@(private)
+checkpoint_ext_supported :: proc "c" (plugin: ^clap.Plugin) -> bool {
+	context = runtime.default_context()
+	instance := instance_of(plugin)
+	if instance == nil || instance.data == nil || instance.definition.checkpoint == nil {
+		return false
+	}
+	if !checkpoint_on_main_thread(instance) {
+		return false
+	}
+	return true
+}
+
+@(private)
+checkpoint_ext_save :: proc "c" (plugin: ^clap.Plugin, stream: ^clap.OStream) -> bool {
+	context = runtime.default_context()
+	instance := instance_of(plugin)
+	if instance == nil || instance.data == nil || instance.definition.checkpoint == nil {
+		return false
+	}
+	if !checkpoint_on_main_thread(instance) {
+		return false
+	}
+	if stream == nil || stream.write == nil {
+		return false
+	}
+	return instance.definition.checkpoint.save(instance.data, stream)
+}
+
+@(private)
+checkpoint_ext_load :: proc "c" (plugin: ^clap.Plugin, stream: ^clap.IStream) -> bool {
+	context = runtime.default_context()
+	instance := instance_of(plugin)
+	if instance == nil || instance.data == nil || instance.definition.checkpoint == nil {
+		return false
+	}
+	if !checkpoint_on_main_thread(instance) {
+		return false
+	}
+	if stream == nil || stream.read == nil {
+		return false
+	}
+	return instance.definition.checkpoint.load(instance.data, stream)
+}
+
+@(private)
+checkpoint_ext_schema_version :: proc "c" (plugin: ^clap.Plugin) -> u32 {
+	context = runtime.default_context()
+	instance := instance_of(plugin)
+	if instance == nil || instance.data == nil || instance.definition.checkpoint == nil {
+		return 0
+	}
+	if !checkpoint_on_main_thread(instance) {
+		return 0
+	}
+	return clap.CARNIVAL_CHECKPOINT_SCHEMA_VERSION
+}
+
+// ---------------------------------------------------------------------------
 // Extension dispatch
 // ---------------------------------------------------------------------------
 
@@ -1167,6 +1207,10 @@ plugin_get_extension :: proc "c" (plugin: ^clap.Plugin, id: cstring) -> rawptr {
 			return nil
 		}
 		return &instance.ext_telemetry
+	case clap.CARNIVAL_EXT_PROCESSING_CHECKPOINT_DRAFT:
+		// Always exposed: `supported()` is the capability query. A product
+		// that does not checkpoint processing state reports false.
+		return &instance.ext_checkpoint
 	}
 	return nil
 }

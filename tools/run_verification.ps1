@@ -42,15 +42,15 @@ $specimens = @(
         Name = 'biquad'; Scenario = 'verification/scenarios/biquad.json'
         Plugin = 'out/reference/biquad.clap'; Class = 'reference'
         ExpectedFail = @()
-        ExpectedClass = @{ partition = 'static_partition_invariant'; automation = 'automation_partition_sensitive_control_rate' }
-        Note = 'Per-sample direct-form-I state; coefficient automation is block-quantized.'
+        ExpectedClass = @{ partition = 'static_partition_invariant'; automation = 'automation_partition_sensitive_control_rate'; checkpoint = 'processing_checkpoint_restore' }
+        Note = 'Per-sample direct-form-I state; coefficient automation is block-quantized; filter history is a processing checkpoint.'
     },
     @{
         Name = 'delay'; Scenario = 'verification/scenarios/delay.json'
         Plugin = 'out/reference/delay.clap'; Class = 'reference'
         ExpectedFail = @()
-        ExpectedClass = @{ partition = 'static_partition_invariant'; automation = 'automation_partition_sensitive_control_rate' }
-        Note = 'Per-sample delay line with schema-4 processing state.'
+        ExpectedClass = @{ partition = 'static_partition_invariant'; automation = 'automation_partition_sensitive_control_rate'; checkpoint = 'processing_checkpoint_restore' }
+        Note = 'Per-sample delay line; processing checkpoint restores the delay line (authoring state stays schema 3).'
     },
     @{
         Name = 'block_smoother'; Scenario = 'verification/scenarios/block_smoother.json'
@@ -62,9 +62,9 @@ $specimens = @(
     @{
         Name = 'leaky_delay'; Scenario = 'verification/scenarios/leaky_delay.json'
         Plugin = 'out/reference/leaky_delay.clap'; Class = 'defective'
-        ExpectedFail = @('state')
-        ExpectedClass = @{ partition = 'static_partition_invariant' }
-        Note = 'Save omits the delay line: state restoration must fail.'
+        ExpectedFail = @('checkpoint')
+        ExpectedClass = @{ partition = 'static_partition_invariant'; state = 'authoring_state_and_migration'; checkpoint = 'processing_checkpoint_restore' }
+        Note = 'Authoring state restores parameters (PASSES); the processing checkpoint claims support but omits the delay line, so the checkpoint probe must fail.'
     },
     @{
         Name = 'nan_trigger'; Scenario = 'verification/scenarios/nan_trigger.json'
@@ -418,12 +418,21 @@ foreach ($specimen in $specimens) {
 Add-Report ''
 Add-Report 'Automation is labelled as a class, not collapsed into pass/fail. The adapter applies a block''s parameter events at block start, so sample-timestamped automation is control-rate and partition-sensitive by contract; static parameters remain a separate, strict invariance class.'
 Add-Report ''
-Add-Report '## Processing-state restoration'
+Add-Report '## Authoring state and migration'
 Add-Report ''
 foreach ($specimen in $specimens) {
     $row = $censusRows | Where-Object { $_.specimen -eq $specimen.Name -and $_.probe -eq 'state' } | Select-Object -First 1
     if ($row) { Add-Report ('- **' + $specimen.Name + '**: ' + $row.observed + ' - ' + $row.summary) }
 }
+Add-Report ''
+Add-Report '## Processing checkpoints (optional capability)'
+Add-Report ''
+foreach ($specimen in $specimens) {
+    $row = $censusRows | Where-Object { $_.specimen -eq $specimen.Name -and $_.probe -eq 'checkpoint' } | Select-Object -First 1
+    if ($row) { Add-Report ('- **' + $specimen.Name + '**: ' + $row.observed + ' (' + $row.probe_class + ') - ' + $row.summary) }
+}
+Add-Report ''
+Add-Report 'Authoring state and processing checkpoints are separate contracts. An authoring state that omits a delay line is not defective: it reopens the project settings. Only a plugin that reports checkpoint support is judged on sample-exact continuation.'
 Add-Report ''
 Add-Report '## Pulse canonical measurement and migration'
 Add-Report ''
@@ -453,7 +462,7 @@ Add-Report ''
 Add-Report '## Conclusions and limits'
 Add-Report ''
 Add-Report '- The small third-party census includes baconpaul/clap-c99-distortion (MIT), built from pinned upstream sources; its sample-offset event handling labels automation partition-invariant, in contrast to the block-start control-rate class.'
-Add-Report '- The deliberately defective processors failed exactly the classes they were built to violate: block-sensitive smoothing (static partition), leaky save/load (state restoration), and NaN generation (non-finite output).'
+Add-Report '- The deliberately defective processors failed exactly the classes they were built to violate: block-sensitive smoothing (static partition), an incomplete processing checkpoint (checkpoint restore; its authoring state passes), and NaN generation (non-finite output).'
 Add-Report '- Good specimens passed their strict invariance and state-restoration probes. Pulse automation is recorded as a control-rate class, not a defect.'
 Add-Report '- Evidence is local Windows x64. CI remains billing-blocked. No universal determinism, real-time or cross-platform claim is made.'
 Add-Report ''

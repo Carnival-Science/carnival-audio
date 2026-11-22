@@ -1,13 +1,18 @@
-// DEFECTIVE reference processor: feedback delay whose save omits its delay line.
+// DEFECTIVE reference processor: feedback delay whose checkpoint omits its
+// delay line.
 //
-// The DSP is the same shape as the good delay reference, but the authoring
-// state schema is 3 and there are no processing-state blob hooks. A host that
-// saves, tears down and restores the plugin gets its parameters back and a
-// zeroed delay line. Output after the restore therefore diverges from an
-// uninterrupted run: the laboratory's state-restoration probe MUST flag it.
+// The DSP is the same shape as the good delay reference, but its processing
+// checkpoint (draft com.carnival-science.processing-checkpoint.draft/1)
+// declares support and saves only the write cursor: it never stores the line.
+// A host that checkpoints, tears down and restores the plugin gets its
+// parameters back (authoring state PASSES) and a zeroed delay line, so output
+// after the restore diverges from an uninterrupted run. The laboratory's
+// CHECKPOINT probe MUST flag it.
 //
-// This proves the probe detects a real omitted-state defect without claiming
-// that every host must serialize processing state.
+// This proves the checkpoint probe detects a real omitted-processing-state
+// defect. It is not a defect of clap.state: authoring state never promised to
+// resume sample-exact computation, and this fixture's parameter restore is
+// correct.
 package reference_leaky_delay
 
 import "base:runtime"
@@ -157,6 +162,91 @@ tail_frames :: proc(data: rawptr) -> u32 {
 	return u32(max(state.delay_frames, 1) * 20)
 }
 
+// ---------------------------------------------------------------------------
+// Processing checkpoint (deliberately incomplete)
+//
+// Payload: magic "CSLKCK01" | u32 version | u32 write_index |
+//          u32 saved_line_samples (always 0 in this fixture).
+//
+// The line is intentionally not written. This is the defect the laboratory's
+// checkpoint probe must catch; parameter (authoring) restore is correct.
+// ---------------------------------------------------------------------------
+
+CHECKPOINT_MAGIC: [8]u8 = {'C', 'S', 'L', 'K', 'C', 'K', '0', '1'}
+CHECKPOINT_VERSION :: u32(1)
+
+checkpoint_save :: proc(data: rawptr, stream: ^clap.OStream) -> bool {
+	state := cast(^State)data
+	if state == nil || stream == nil || stream.write == nil {
+		return false
+	}
+	header: [20]u8
+	copy(header[:8], CHECKPOINT_MAGIC[:])
+	put_u32(header[:], 8, CHECKPOINT_VERSION)
+	put_u32(header[:], 12, u32(state.write_index))
+	put_u32(header[:], 16, 0) // Defect: the delay line is never saved.
+	return stream.write(stream, &header[0], u64(len(header))) == i64(len(header))
+}
+
+checkpoint_load :: proc(data: rawptr, stream: ^clap.IStream) -> bool {
+	state := cast(^State)data
+	if state == nil || stream == nil || stream.read == nil {
+		return false
+	}
+	header: [20]u8
+	if !read_all(stream, header[:]) {
+		return false
+	}
+	for index in 0 ..< 8 {
+		if header[index] != CHECKPOINT_MAGIC[index] {
+			return false
+		}
+	}
+	if get_u32(header[:], 8) != CHECKPOINT_VERSION {
+		return false
+	}
+	write_index := int(get_u32(header[:], 12))
+	if write_index < 0 || write_index >= DELAY_MAX_FRAMES {
+		return false
+	}
+	if get_u32(header[:], 16) != 0 {
+		return false
+	}
+	state.write_index = write_index
+	return true
+}
+
+checkpoint_ops: adapter.Checkpoint_Ops = {
+	save = checkpoint_save,
+	load = checkpoint_load,
+}
+
+put_u32 :: proc(buffer: []u8, offset: int, value: u32) {
+	buffer[offset + 0] = u8(value)
+	buffer[offset + 1] = u8(value >> 8)
+	buffer[offset + 2] = u8(value >> 16)
+	buffer[offset + 3] = u8(value >> 24)
+}
+
+get_u32 :: proc(buffer: []u8, offset: int) -> u32 {
+	return u32(buffer[offset]) |
+		u32(buffer[offset + 1]) << 8 |
+		u32(buffer[offset + 2]) << 16 |
+		u32(buffer[offset + 3]) << 24
+}
+
+read_all :: proc(stream: ^clap.IStream, bytes: []u8) -> bool {
+	read := 0
+	for read < len(bytes) {
+		count := stream.read(stream, raw_data(bytes[read:]), u64(len(bytes) - read))
+		if count <= 0 {
+			return false
+		}
+		read += int(count)
+	}
+	return true
+}
+
 backend: adapter.Backend_VTable = {
 	create = create,
 	destroy = destroy,
@@ -175,6 +265,7 @@ definition: adapter.Definition = {
 	output_port_name = "Output",
 	state_magic = {'C', 'S', 'L', 'E', 'A', 'K', '0', '1'},
 	state_schema = 3,
+	checkpoint = &checkpoint_ops,
 	tail_frames = tail_frames,
 }
 

@@ -111,3 +111,57 @@ Carnival_Telemetry_Capture :: struct {
 	valid:          proc "c" (plugin: ^Plugin) -> bool,
 	schema_version: proc "c" (plugin: ^Plugin) -> u32,
 }
+
+// ---------------------------------------------------------------------------
+// Draft: Carnival processing-checkpoint extension
+// ---------------------------------------------------------------------------
+//
+// A **separate, explicitly optional** capability from authoring state.
+//
+// Authoring state (`clap.state`) reopens a project with the same settings. It
+// is mandatory and does not promise that processing continues from the same
+// sample. A **processing checkpoint** resumes computation at an exact sample
+// position: filter history, delay lines, envelope timers. A plugin may support
+// it or not; a host must ask `supported()` before using save/load, and must
+// never treat an omitted delay line in `clap.state` as a defect.
+//
+// The payload is plugin-owned bytes written through the normal CLAP stream
+// interface. The draft frames nothing itself: the plugin writes its own magic,
+// payload version and fields, and validates them on load. `schema_version`
+// versions the capability contract, not the payload. The payload is expected
+// to be small (a delay line is bounded by the plugin's own maximum delay);
+// plugins that cannot snapshot cheaply declare `supported() == false`.
+//
+// Thread rule: main thread only, exactly like the telemetry draft.
+CARNIVAL_EXT_PROCESSING_CHECKPOINT_DRAFT :: "com.carnival-science.processing-checkpoint.draft/1"
+
+// Frozen draft UUID, generated once for this revision (not random at runtime).
+CARNIVAL_CHECKPOINT_DRAFT_UUID :: [16]u8{
+	0x5C, 0x2F, 0x0A, 0x7E, 0x4B, 0x1D, 0x4C, 0x8E,
+	0x9F, 0x3A, 0x7D, 0x6E, 0x2B, 0x1C, 0x0A, 0x95,
+}
+
+// Capability contract revision. A record layout change inside a plugin payload
+// is the plugin's own version field; this number changes only if the vtable
+// semantics below change (in which case the extension id also gets a new /N).
+CARNIVAL_CHECKPOINT_SCHEMA_VERSION :: u32(1)
+
+// Carnival_Processing_Checkpoint is the plugin-implemented extension vtable.
+//
+//   supported        True only when the plugin can save and restore its
+//                    processing state at an exact sample position. A host that
+//                    gets false must not call save/load and must not infer a
+//                    defect from the absence of a checkpoint.
+//   save             Write the complete processing checkpoint to `stream`.
+//                    Returns false on failure; the host then has no checkpoint.
+//   load             Restore from `stream`. The plugin validates its own magic,
+//                    version and length before committing. On false the plugin
+//                    keeps its previous processing state (all-or-nothing).
+//   schema_version   CARNIVAL_CHECKPOINT_SCHEMA_VERSION implemented by this
+//                    build.
+Carnival_Processing_Checkpoint :: struct {
+	supported:      proc "c" (plugin: ^Plugin) -> bool,
+	save:           proc "c" (plugin: ^Plugin, stream: ^OStream) -> bool,
+	load:           proc "c" (plugin: ^Plugin, stream: ^IStream) -> bool,
+	schema_version: proc "c" (plugin: ^Plugin) -> u32,
+}

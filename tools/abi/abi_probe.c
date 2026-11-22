@@ -304,5 +304,23 @@ int main(void) {
    FIELD("Carnival_Telemetry_Capture", "schema_version", clap_carnival_telemetry_capture_t,
          schema_version);
 
+   // Draft Carnival processing-checkpoint extension (separate capability).
+   printf("carnival_checkpoint_ext_id %s\n", CARNIVAL_EXT_PROCESSING_CHECKPOINT_DRAFT);
+   printf("carnival_checkpoint_schema_version %u\n", (unsigned)CARNIVAL_CHECKPOINT_SCHEMA_VERSION);
+   {
+      const unsigned char checkpoint_uuid[16] = CARNIVAL_CHECKPOINT_DRAFT_UUID;
+      printf("carnival_uuid checkpoint");
+      for (int i = 0; i < 16; ++i)
+         printf(" %u", (unsigned)checkpoint_uuid[i]);
+      printf("\n");
+   }
+   SIZE("Carnival_Processing_Checkpoint", clap_carnival_processing_checkpoint_t);
+   FIELD("Carnival_Processing_Checkpoint", "supported", clap_carnival_processing_checkpoint_t,
+         supported);
+   FIELD("Carnival_Processing_Checkpoint", "save", clap_carnival_processing_checkpoint_t, save);
+   FIELD("Carnival_Processing_Checkpoint", "load", clap_carnival_processing_checkpoint_t, load);
+   FIELD("Carnival_Processing_Checkpoint", "schema_version",
+         clap_carnival_processing_checkpoint_t, schema_version);
+
    return 0;
 }

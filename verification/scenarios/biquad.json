@@ -42,5 +42,5 @@
   "tail": { "silence_frames": 24000, "threshold_db": -90 },
   "perturbation": { "delta_frame": 1000, "delta": 0.25 },
   "isolation": { "enabled": true, "alt_params": [ { "id": 2101, "value": 300 } ] },
-  "probes": ["nonfinite", "repeatability", "partition", "automation", "state", "isolation", "reset", "tail", "perturbation"]
+  "probes": ["nonfinite", "repeatability", "partition", "automation", "state", "checkpoint", "isolation", "reset", "tail", "perturbation"]
 }

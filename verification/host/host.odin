@@ -339,6 +339,7 @@ Instance :: struct {
 	latency:     ^clap.Plugin_Latency,
 	tail:        ^clap.Plugin_Tail,
 	telemetry:   ^clap.Carnival_Telemetry_Capture,
+	checkpoint:  ^clap.Carnival_Processing_Checkpoint,
 
 	process_calls: u64,
 }
@@ -410,6 +411,10 @@ instance_create :: proc(
 	instance.telemetry = cast(^clap.Carnival_Telemetry_Capture)plugin.get_extension(
 		plugin,
 		cstring(clap.CARNIVAL_EXT_TELEMETRY_CAPTURE_DRAFT),
+	)
+	instance.checkpoint = cast(^clap.Carnival_Processing_Checkpoint)plugin.get_extension(
+		plugin,
+		cstring(clap.CARNIVAL_EXT_PROCESSING_CHECKPOINT_DRAFT),
 	)
 
 	// Allocate planar scratch buffers once. The process path only writes into
@@ -752,6 +757,51 @@ instance_tail_frames :: proc(instance: ^Instance) -> u32 {
 		return 0
 	}
 	return instance.tail.get(instance.plugin)
+}
+
+// ---------------------------------------------------------------------------
+// Draft processing checkpoint (a different contract from authoring state)
+// ---------------------------------------------------------------------------
+
+instance_has_checkpoint :: proc(instance: ^Instance) -> bool {
+	if instance == nil || instance.checkpoint == nil || instance.checkpoint.supported == nil {
+		return false
+	}
+	return instance.checkpoint.supported(instance.plugin)
+}
+
+instance_checkpoint_schema_version :: proc(instance: ^Instance) -> u32 {
+	if instance == nil || instance.checkpoint == nil || instance.checkpoint.schema_version == nil {
+		return 0
+	}
+	return instance.checkpoint.schema_version(instance.plugin)
+}
+
+instance_checkpoint_save :: proc(instance: ^Instance, allocator := context.allocator) -> ([]u8, bool) {
+	if instance == nil || instance.checkpoint == nil || instance.checkpoint.save == nil {
+		return nil, false
+	}
+	stream := State_Stream{data = make([dynamic]u8, 0, 4096, allocator)}
+	ostream := clap.OStream{ctx = &stream, write = state_write}
+	if !instance.checkpoint.save(instance.plugin, &ostream) {
+		delete(stream.data)
+		return nil, false
+	}
+	bytes := make([]u8, len(stream.data), allocator)
+	copy(bytes, stream.data[:])
+	delete(stream.data)
+	return bytes, true
+}
+
+instance_checkpoint_load :: proc(instance: ^Instance, bytes: []u8) -> bool {
+	if instance == nil || instance.checkpoint == nil || instance.checkpoint.load == nil {
+		return false
+	}
+	stream := State_Stream{data = make([dynamic]u8, 0, len(bytes))}
+	defer delete(stream.data)
+	append(&stream.data, ..bytes)
+	istream := clap.IStream{ctx = &stream, read = state_read}
+	return instance.checkpoint.load(instance.plugin, &istream)
 }
 
 // ---------------------------------------------------------------------------

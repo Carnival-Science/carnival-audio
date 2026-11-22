@@ -732,39 +732,78 @@ test_state_rejects_bad_magic_and_truncation :: proc(t: ^testing.T) {
 	testing.expect(t, state.load(plugin, &istream) == false, "truncated state rejected")
 }
 
-// Processing-state blob hooks used by the schema-4 extension test.
-Blob_Probe :: struct {
-	seen: [4]u8,
+// Processing-checkpoint test hooks. The payload is deliberately minimal: one
+// u32 value framed by a magic, which is enough to prove the adapter forwarding
+// and that no blob is smuggled through clap.state.
+Checkpoint_Probe :: struct {
+	value: u32,
 }
 
-blob_load_calls: int
+checkpoint_save_calls: int
+checkpoint_load_calls: int
 
-blob_size :: proc(data: rawptr) -> u32 {
-	_ = data
-	return 4
-}
+CHECKPOINT_MAGIC :: u32(0x4348474B) // "CHGK"
 
-blob_save :: proc(data: rawptr, stream: ^clap.OStream) -> bool {
-	_ = data
-	bytes := [4]u8{0xDE, 0xAD, 0xBE, 0xEF}
+checkpoint_save :: proc(data: rawptr, stream: ^clap.OStream) -> bool {
+	checkpoint_save_calls += 1
+	probe := cast(^Checkpoint_Probe)data
+	bytes: [8]u8
+	put_u32_probe(bytes[:], 0, CHECKPOINT_MAGIC)
+	put_u32_probe(bytes[:], 4, probe.value)
 	return stream.write(stream, &bytes[0], u64(len(bytes))) == i64(len(bytes))
 }
 
-blob_load :: proc(data: rawptr, bytes: []u8) -> bool {
-	_ = data
-	blob_load_calls += 1
-	return len(bytes) == 4 && bytes[0] == 0xDE && bytes[3] == 0xEF
+checkpoint_load :: proc(data: rawptr, stream: ^clap.IStream) -> bool {
+	checkpoint_load_calls += 1
+	probe := cast(^Checkpoint_Probe)data
+	bytes: [8]u8
+	if !read_all_probe(stream, bytes[:]) {
+		return false
+	}
+	if get_u32_probe(bytes[:], 0) != CHECKPOINT_MAGIC {
+		return false
+	}
+	probe.value = get_u32_probe(bytes[:], 4)
+	return true
+}
+
+checkpoint_ops: Checkpoint_Ops = {
+	save = checkpoint_save,
+	load = checkpoint_load,
+}
+
+put_u32_probe :: proc(buffer: []u8, offset: int, value: u32) {
+	buffer[offset + 0] = u8(value)
+	buffer[offset + 1] = u8(value >> 8)
+	buffer[offset + 2] = u8(value >> 16)
+	buffer[offset + 3] = u8(value >> 24)
+}
+
+get_u32_probe :: proc(buffer: []u8, offset: int) -> u32 {
+	return u32(buffer[offset]) |
+		u32(buffer[offset + 1]) << 8 |
+		u32(buffer[offset + 2]) << 16 |
+		u32(buffer[offset + 3]) << 24
+}
+
+read_all_probe :: proc(stream: ^clap.IStream, bytes: []u8) -> bool {
+	read := 0
+	for read < len(bytes) {
+		count := stream.read(stream, raw_data(bytes[read:]), u64(len(bytes) - read))
+		if count <= 0 {
+			return false
+		}
+		read += int(count)
+	}
+	return true
 }
 
 @(test)
-test_state_schema4_processing_blob_round_trip :: proc(t: ^testing.T) {
+test_checkpoint_capability_round_trip :: proc(t: ^testing.T) {
 	definition := new(Definition)
 	defer free(definition)
 	definition^ = test_definition
-	definition.state_schema = 4
-	definition.state_blob_size = blob_size
-	definition.state_blob_save = blob_save
-	definition.state_blob_load = blob_load
+	definition.checkpoint = &checkpoint_ops
 	register_definition(definition)
 	defer entry_deinit()
 	testing.expect(t, entry_init("adapter-test.clap"), "entry_init")
@@ -778,34 +817,67 @@ test_state_schema4_processing_blob_round_trip :: proc(t: ^testing.T) {
 	defer plugin.destroy(plugin)
 	testing.expect(t, plugin.init(plugin), "init")
 
-	state := cast(^clap.Plugin_State)plugin.get_extension(plugin, cstring(clap.CLAP_EXT_STATE))
-	params := cast(^clap.Plugin_Params)plugin.get_extension(plugin, cstring(clap.CLAP_EXT_PARAMS))
-	testing.expect(t, state != nil && params != nil, "extensions")
-	testing.expect(t, set_param(plugin, 501, 0.75), "set gain")
+	extension := cast(^clap.Carnival_Processing_Checkpoint)plugin.get_extension(
+		plugin, cstring(clap.CARNIVAL_EXT_PROCESSING_CHECKPOINT_DRAFT))
+	testing.expect(t, extension != nil, "checkpoint extension exposed")
+	if extension == nil {
+		return
+	}
+	testing.expect(t, extension.supported(plugin), "checkpoint supported")
+	testing.expect_value(t, extension.schema_version(plugin), clap.CARNIVAL_CHECKPOINT_SCHEMA_VERSION)
 
+	probe := cast(^Checkpoint_Probe)instance_of(plugin).data
+	probe.value = 0xA5A5_5A5A
 	stream := Mem_Stream{}
 	ostream := clap.OStream{ctx = &stream, write = mem_write}
-	testing.expect(t, state.save(plugin, &ostream), "save")
-	// header 16 + two params 24 + blob length 4 + blob 4
-	testing.expect_value(t, stream.size, 48)
+	testing.expect(t, extension.save(plugin, &ostream), "save")
+	testing.expect_value(t, stream.size, 8)
+	// Authoring state stays parameter-only: the checkpoint bytes never enter
+	// clap.state.
+	state := cast(^clap.Plugin_State)plugin.get_extension(plugin, cstring(clap.CLAP_EXT_STATE))
+	state_stream := Mem_Stream{}
+	state_ostream := clap.OStream{ctx = &state_stream, write = mem_write}
+	testing.expect(t, state.save(plugin, &state_ostream), "state save")
+	testing.expect_value(t, state_stream.size, 8 + 4 + 4 + 2 * 12)
 
-	testing.expect(t, set_param(plugin, 501, 0.1), "change gain")
-	blob_load_calls = 0
+	probe.value = 0
 	istream := clap.IStream{ctx = &stream, read = mem_read}
-	testing.expect(t, state.load(plugin, &istream), "load")
-	testing.expect_value(t, blob_load_calls, 1)
-	value: f64
-	testing.expect(t, params.get_value(plugin, 501, &value), "read restored")
-	testing.expect_value(t, value, f64(0.75))
+	testing.expect(t, extension.load(plugin, &istream), "load")
+	testing.expect_value(t, probe.value, u32(0xA5A5_5A5A))
+
+	// A shorter payload is rejected by the product-side validator; the adapter
+	// only forwards it.
+	short := Mem_Stream{size = 4}
+	short_input := clap.IStream{ctx = &short, read = mem_read}
+	testing.expect(t, extension.load(plugin, &short_input) == false, "short checkpoint rejected")
 }
 
 @(test)
-test_state_schema4_rejects_incomplete_blob_hooks :: proc(t: ^testing.T) {
+test_checkpoint_reports_unsupported_without_hooks :: proc(t: ^testing.T) {
+	plugin, harness := instantiate(t)
+	defer destroy_instance(plugin, harness)
+	testing.expect(t, plugin.init(plugin), "init")
+	extension := cast(^clap.Carnival_Processing_Checkpoint)plugin.get_extension(
+		plugin, cstring(clap.CARNIVAL_EXT_PROCESSING_CHECKPOINT_DRAFT))
+	testing.expect(t, extension != nil, "extension still exposed for the capability query")
+	if extension == nil {
+		return
+	}
+	testing.expect(t, !extension.supported(plugin), "unsupported without hooks")
+	stream := Mem_Stream{}
+	ostream := clap.OStream{ctx = &stream, write = mem_write}
+	testing.expect(t, !extension.save(plugin, &ostream), "save refused when unsupported")
+	istream := clap.IStream{ctx = &stream, read = mem_read}
+	testing.expect(t, !extension.load(plugin, &istream), "load refused when unsupported")
+	testing.expect_value(t, extension.schema_version(plugin), u32(0))
+}
+
+@(test)
+test_checkpoint_rejects_incomplete_hooks :: proc(t: ^testing.T) {
 	definition := new(Definition)
 	defer free(definition)
 	definition^ = test_definition
-	definition.state_schema = 4
-	definition.state_blob_size = blob_size
+	definition.checkpoint = &Checkpoint_Ops{save = checkpoint_save}
 	register_definition(definition)
 	defer entry_deinit()
 	testing.expect(t, entry_init("adapter-test.clap"), "entry_init")
@@ -815,7 +887,7 @@ test_state_schema4_rejects_incomplete_blob_hooks :: proc(t: ^testing.T) {
 	defer free(harness)
 	prepare_harness(harness)
 	plugin := factory.create_plugin(factory, &harness.host, cstring(TEST_DESCRIPTOR_ID))
-	testing.expect(t, plugin == nil, "partial blob hooks are rejected")
+	testing.expect(t, plugin == nil, "partial checkpoint hooks are rejected")
 }
 
 // Counting allocator used to prove the process path performs no allocation

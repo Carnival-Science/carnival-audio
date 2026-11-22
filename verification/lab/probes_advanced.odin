@@ -201,7 +201,7 @@ probe_state :: proc(ctx: ^Run_Context) -> Probe_Builder {
 	builder := probe_start(
 		"state",
 		"authoring_state_and_migration",
-		"Authoring state is versioned parameter state. Processing state is not authoring state; processors may additionally serialize a schema-4 processing blob. Migration expectations are declared per historical fixture.",
+		"Authoring state is versioned parameter state: reopening a project must restore the settings. It does not promise that processing resumes at the same sample; render equality after a restore belongs to the separate processing-checkpoint probe. Migration expectations are declared per historical fixture.",
 	)
 	instance, opened := open_instance(ctx, ctx.scenario.max_block_frames, nil, false)
 	if !opened {
@@ -226,7 +226,12 @@ probe_state :: proc(ctx: ^Run_Context) -> Probe_Builder {
 	if len(ctx.scenario.params) > 0 {
 		first := ctx.scenario.params[0]
 		_ = host.instance_set_param(instance, first.id, first.value * 0.5)
-		if !host.instance_load_state(instance, saved) {
+		// A capture-episode switch (part of loading the capture flag) requires
+		// quiescent processing; a real host loads state while stopped.
+		host.instance_stop(instance)
+		loaded := host.instance_load_state(instance, saved)
+		_ = host.instance_start(instance)
+		if !loaded {
 			probe_fail(&builder, "state load of a just-saved blob failed")
 			return builder
 		}
@@ -246,85 +251,7 @@ probe_state :: proc(ctx: ^Run_Context) -> Probe_Builder {
 	}
 	metric_add_int(&builder, "restored_authoring_params", restored_params)
 
-	// 2. Continuous restore: prefix -> save -> (fresh instance) load -> suffix.
-	prefix := min(ctx.scenario.input.frames / 2, 8192)
-	suffix := ctx.scenario.input.frames - prefix
-	if suffix > 0 {
-		continuous := make([][]f32, 2)
-		for channel in 0 ..< 2 {
-			continuous[channel] = make([]f32, ctx.scenario.input.frames)
-		}
-		defer destroy_input(continuous)
-
-		continuous_ok := true
-		// A: one instance processes prefix and suffix continuously.
-		instance_a, opened_a := open_instance(ctx, ctx.scenario.max_block_frames, nil, ctx.scenario.telemetry.enabled)
-		if !opened_a {
-			continuous_ok = false
-		} else {
-			if !process_range(instance_a, ctx.input, 0, prefix, continuous, 0) {
-				continuous_ok = false
-			}
-			state_a, state_a_ok := host.instance_save_state(instance_a)
-			if state_a_ok {
-				metric_add(&builder, "processing_state_sha256", sha256_hex(state_a))
-				delete(state_a)
-			}
-			if !process_range(instance_a, ctx.input, prefix, suffix, continuous, prefix) {
-				continuous_ok = false
-			}
-			host.instance_destroy(instance_a)
-		}
-
-		restored := make([][]f32, 2)
-		for channel in 0 ..< 2 {
-			restored[channel] = make([]f32, ctx.scenario.input.frames)
-		}
-		defer destroy_input(restored)
-		if continuous_ok {
-			// B: a fresh instance restores the saved state before the suffix.
-			instance_b, opened_b := open_instance(ctx, ctx.scenario.max_block_frames, nil, ctx.scenario.telemetry.enabled)
-			if !opened_b {
-				continuous_ok = false
-			} else {
-				if !process_range(instance_b, ctx.input, 0, prefix, restored, 0) {
-					continuous_ok = false
-				}
-				saved_b, saved_b_ok := host.instance_save_state(instance_b)
-				if !saved_b_ok {
-					continuous_ok = false
-				} else {
-					// The fresh instance must start from no processing state. A
-					// new instance has that property; load the saved authoring
-					// plus processing blob.
-					host.instance_destroy(instance_b)
-					instance_c, opened_c := open_instance(ctx, ctx.scenario.max_block_frames, nil, false)
-					if !opened_c {
-						continuous_ok = false
-					} else {
-						if !host.instance_load_state(instance_c, saved_b) {
-							continuous_ok = false
-						} else if !process_range(instance_c, ctx.input, prefix, suffix, restored, prefix) {
-							continuous_ok = false
-						}
-						host.instance_destroy(instance_c)
-					}
-					delete(saved_b)
-				}
-			}
-		}
-		if continuous_ok {
-			left := suffix_slice_hash(continuous, prefix, suffix)
-			right := suffix_slice_hash(restored, prefix, suffix)
-			metric_add(&builder, "continuous_suffix_hash", left)
-			metric_add(&builder, "restored_suffix_hash", right)
-			if left != right {
-				probe_fail(&builder, "output after a state restore diverges from the uninterrupted run (processing state missing)")
-			}
-		}
-	}
-
-	// 3. Historical fixture migration.
+	// 2. Historical fixture migration.
 	for fixture in ctx.scenario.state.fixtures {
 		bytes, decoded := hex_decode(fixture.hex, context.temp_allocator)
 		if !decoded {
@@ -336,7 +263,9 @@ probe_state :: proc(ctx: ^Run_Context) -> Probe_Builder {
 			probe_fail(&builder, fmt.aprintf("could not open instance for fixture %s", fixture.name))
 			continue
 		}
+		host.instance_stop(fixture_instance)
 		loaded := host.instance_load_state(fixture_instance, bytes)
+		_ = host.instance_start(fixture_instance)
 		if !loaded {
 			probe_fail(&builder, fmt.aprintf("fixture %s (schema %d) failed to load", fixture.name, fixture.schema))
 			host.instance_destroy(fixture_instance)
@@ -371,7 +300,6 @@ probe_state :: proc(ctx: ^Run_Context) -> Probe_Builder {
 		for channel in 0 ..< 2 {
 			out[channel] = make([]f32, 4096)
 		}
-		_ = host.instance_start(fixture_instance)
 		_ = process_range(fixture_instance, short, 0, 4096, out, 0)
 		collector := host.Capture_Collector{records = make([dynamic]clap.Carnival_Measurement_Record, 0, 16)}
 		_ = host.instance_capture_drain(fixture_instance, &collector)
@@ -413,15 +341,20 @@ probe_state :: proc(ctx: ^Run_Context) -> Probe_Builder {
 				false,
 			)
 			fixture_render_ok := false
-			if fixture_render_opened && host.instance_load_state(fixture_render_instance, bytes) {
-				fixture_render_ok = process_range(
-					fixture_render_instance,
-					ctx.input,
-					0,
-					ctx.scenario.input.frames,
-					fixture_output,
-					0,
-				)
+			if fixture_render_opened {
+				host.instance_stop(fixture_render_instance)
+				loaded_fixture := host.instance_load_state(fixture_render_instance, bytes)
+				_ = host.instance_start(fixture_render_instance)
+				if loaded_fixture {
+					fixture_render_ok = process_range(
+						fixture_render_instance,
+						ctx.input,
+						0,
+						ctx.scenario.input.frames,
+						fixture_output,
+						0,
+					)
+				}
 			}
 			reference_ok := process_range(
 				reference_instance,
@@ -461,10 +394,155 @@ probe_state :: proc(ctx: ^Run_Context) -> Probe_Builder {
 		)
 		if len(ctx.scenario.state.fixtures) == 0 {
 			builder.summary = fmt.aprintf(
-				"authoring round trip restored %d parameters; continuous state restore checked",
+				"authoring round trip restored %d parameters",
 				restored_params,
 			)
 		}
+	}
+	return builder
+}
+
+// ---------------------------------------------------------------------------
+// Processing checkpoint (separate from authoring state)
+// ---------------------------------------------------------------------------
+
+// process_suffix drives one instance over [start, start+frames) with the host
+// steady clock restarting at zero, as a freshly restored instance would.
+process_suffix :: proc(
+	instance: ^host.Instance,
+	input: [][]f32,
+	start, frames: int,
+	output: [][]f32,
+	out_offset: int,
+) -> bool {
+	if frames < 0 || start + frames > len(input[0]) {
+		return false
+	}
+	BLOCK :: 512
+	absolute := start
+	written := 0
+	steady: i64 = 0
+	for written < frames {
+		size := min(BLOCK, frames - written)
+		in_slices := [][]f32{
+			input[0][absolute:absolute + size],
+			input[1][absolute:absolute + size],
+		}
+		out_slices := [][]f32{
+			output[0][out_offset + written:out_offset + written + size],
+			output[1][out_offset + written:out_offset + written + size],
+		}
+		status, called := host.instance_process(
+			instance,
+			u32(size),
+			in_slices,
+			out_slices,
+			steady,
+			nil,
+			nil,
+		)
+		if !called || status == clap.CLAP_PROCESS_ERROR {
+			return false
+		}
+		absolute += size
+		written += size
+		steady += i64(size)
+	}
+	return true
+}
+
+probe_checkpoint :: proc(ctx: ^Run_Context) -> Probe_Builder {
+	builder := probe_start(
+		"checkpoint",
+		"processing_checkpoint_restore",
+		"Optional capability: the specimen must first report supported() for the draft processing-checkpoint extension. A checkpoint resumes computation at an exact sample position, so the suffix after a restore must match an uninterrupted run. This is NOT the authoring-state contract: an authoring state that omits a delay line is not a defect unless the checkpoint capability is claimed.",
+	)
+	probe_instance, opened := open_instance(ctx, ctx.scenario.max_block_frames, nil, false)
+	if !opened {
+		probe_fail(&builder, "could not open instance for checkpoint probe")
+		return builder
+	}
+	supported := host.instance_has_checkpoint(probe_instance)
+	schema_version := host.instance_checkpoint_schema_version(probe_instance)
+	host.instance_destroy(probe_instance)
+	if !supported {
+		builder.status = .Skip
+		builder.summary = "specimen reports no processing-checkpoint support"
+		return builder
+	}
+	metric_add_int(&builder, "checkpoint_schema_version", int(schema_version))
+
+	prefix := min(ctx.scenario.input.frames / 2, 8192)
+	suffix := ctx.scenario.input.frames - prefix
+	if suffix <= 0 {
+		builder.status = .Skip
+		builder.summary = "input too short for a prefix/suffix checkpoint split"
+		return builder
+	}
+
+	continuous := make([][]f32, 2)
+	restored := make([][]f32, 2)
+	for channel in 0 ..< 2 {
+		continuous[channel] = make([]f32, ctx.scenario.input.frames)
+		restored[channel] = make([]f32, ctx.scenario.input.frames)
+	}
+	defer destroy_input(continuous)
+	defer destroy_input(restored)
+
+	instance_a, opened_a := open_instance(ctx, ctx.scenario.max_block_frames, nil, false)
+	if !opened_a {
+		probe_fail(&builder, "could not open the uninterrupted instance")
+		return builder
+	}
+	defer host.instance_destroy(instance_a)
+	continuous_ok := process_range(instance_a, ctx.input, 0, prefix, continuous, 0)
+	checkpoint: []u8
+	checkpoint_ok := false
+	if continuous_ok {
+		checkpoint, checkpoint_ok = host.instance_checkpoint_save(instance_a)
+	}
+	if continuous_ok {
+		continuous_ok = process_range(instance_a, ctx.input, prefix, suffix, continuous, prefix)
+	}
+	if !checkpoint_ok {
+		probe_fail(&builder, "checkpoint save failed")
+		return builder
+	}
+	metric_add_int(&builder, "checkpoint_bytes", len(checkpoint))
+	metric_add(&builder, "checkpoint_sha256", sha256_hex(checkpoint))
+	defer delete(checkpoint)
+
+	instance_b, opened_b := open_instance(ctx, ctx.scenario.max_block_frames, nil, false)
+	if !opened_b {
+		probe_fail(&builder, "could not open the restored instance")
+		return builder
+	}
+	defer host.instance_destroy(instance_b)
+	host.instance_stop(instance_b)
+	loaded := host.instance_checkpoint_load(instance_b, checkpoint)
+	_ = host.instance_start(instance_b)
+	if !loaded {
+		probe_fail(&builder, "checkpoint load failed")
+		return builder
+	}
+	restored_ok := process_suffix(instance_b, ctx.input, prefix, suffix, restored, prefix)
+	if !continuous_ok || !restored_ok {
+		probe_fail(&builder, "a checkpoint render failed")
+		return builder
+	}
+	left := suffix_slice_hash(continuous, prefix, suffix)
+	right := suffix_slice_hash(restored, prefix, suffix)
+	metric_add(&builder, "continuous_suffix_hash", left)
+	metric_add(&builder, "restored_suffix_hash", right)
+	if left != right {
+		probe_fail(&builder, "output after a processing checkpoint restore diverges from the uninterrupted run")
+	}
+	if builder.status == .Pass {
+		builder.summary = fmt.aprintf(
+			"checkpoint restore continues the suffix bit-exactly (%d frames after a %d-frame prefix)",
+			suffix,
+			prefix,
+		)
 	}
 	return builder
 }

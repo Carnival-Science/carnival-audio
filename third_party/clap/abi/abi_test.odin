@@ -69,6 +69,7 @@ test_c_abi_layout_matches_odin :: proc(t: ^testing.T) {
 		{"Carnival_Measurement_Record", size_of(Carnival_Measurement_Record)},
 		{"Carnival_Capture_Sink", size_of(Carnival_Capture_Sink)},
 		{"Carnival_Telemetry_Capture", size_of(Carnival_Telemetry_Capture)},
+		{"Carnival_Processing_Checkpoint", size_of(Carnival_Processing_Checkpoint)},
 	}
 	size_seen := make([]bool, len(size_cases), context.allocator)
 	defer delete(size_seen)
@@ -227,6 +228,10 @@ test_c_abi_layout_matches_odin :: proc(t: ^testing.T) {
 		{"Carnival_Telemetry_Capture.dropped", int(offset_of(Carnival_Telemetry_Capture, dropped))},
 		{"Carnival_Telemetry_Capture.valid", int(offset_of(Carnival_Telemetry_Capture, valid))},
 		{"Carnival_Telemetry_Capture.schema_version", int(offset_of(Carnival_Telemetry_Capture, schema_version))},
+		{"Carnival_Processing_Checkpoint.supported", int(offset_of(Carnival_Processing_Checkpoint, supported))},
+		{"Carnival_Processing_Checkpoint.save", int(offset_of(Carnival_Processing_Checkpoint, save))},
+		{"Carnival_Processing_Checkpoint.load", int(offset_of(Carnival_Processing_Checkpoint, load))},
+		{"Carnival_Processing_Checkpoint.schema_version", int(offset_of(Carnival_Processing_Checkpoint, schema_version))},
 	}
 	offset_seen := make([]bool, len(offset_cases), context.allocator)
 	defer delete(offset_seen)
@@ -270,6 +275,10 @@ test_c_abi_layout_matches_odin :: proc(t: ^testing.T) {
 			testing.expect_value(t, fields[1], fmt.tprint(CARNIVAL_MEASUREMENT_SCHEMA_VERSION))
 		case "carnival_channels":
 			testing.expect_value(t, fields[1], fmt.tprint(CARNIVAL_MEASUREMENT_CHANNELS))
+		case "carnival_checkpoint_ext_id":
+			testing.expect_value(t, fields[1], CARNIVAL_EXT_PROCESSING_CHECKPOINT_DRAFT)
+		case "carnival_checkpoint_schema_version":
+			testing.expect_value(t, fields[1], fmt.tprint(CARNIVAL_CHECKPOINT_SCHEMA_VERSION))
 		case "carnival_uuid":
 			if len(fields) != 18 {
 				testing.expectf(t, false, "malformed carnival_uuid line: %q", line)
@@ -280,6 +289,8 @@ test_c_abi_layout_matches_odin :: proc(t: ^testing.T) {
 				expected = CARNIVAL_TELEMETRY_DRAFT_UUID
 			} else if fields[1] == "schema" {
 				expected = CARNIVAL_MEASUREMENT_SCHEMA_UUID
+			} else if fields[1] == "checkpoint" {
+				expected = CARNIVAL_CHECKPOINT_DRAFT_UUID
 			} else {
 				testing.expectf(t, false, "unknown carnival_uuid name: %q", fields[1])
 				continue
