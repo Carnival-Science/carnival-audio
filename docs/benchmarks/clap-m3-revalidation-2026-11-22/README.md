@@ -56,11 +56,19 @@ external-tool record
    census rows, classes and Pulse `output.wav`/`records.csv` hashes are
    identical.
 
-## Explicit gap
+## Explicit gap — closed (2026-11-22, later same day)
 
-`clap-validator` and `clap-trap` were not available on this machine, so their
-pass counts and render comparison were **not re-run**. No claim is made that
-they were. Given the unchanged standard extension surface and state schema, the
-pinned Milestone 1 results remain the applicable external evidence; a host
-with those tools should rerun them against the hash above and append the result
-here.
+The pinned external tools were located in the M1 tool cache
+(`%TEMP%\pulse-tools`) and rerun against the rebuilt artifact above
+(`5838e6c4…`, the source-identical rebuild):
+
+| Tool | Result |
+| --- | --- |
+| `clap-validator` (0.4.1, pinned) | **44 run, 32 passed, 0 failed, 12 skipped** — identical to Milestone 1; `tools/m3-validator.log` |
+| `clap-trap validate` | clean pass; `tools/m3-trap-validate.log` |
+| `clap-trap state --roundtrip` | **68 bytes saved, all 4 parameters match after restore**; `tools/m3-trap-state.log` |
+| `clap-trap process` (float, 256-frame blocks) | **0 differing data bytes across 384,000** (48 kHz stereo float32 sine render); input/output WAVs and logs in `tools/` |
+
+Inputs for this run were regenerated (`tools/m3-render-input.wav`); the render
+output is byte-identical to its input over the data chunk. The earlier gap
+statement above applied only until this run.
