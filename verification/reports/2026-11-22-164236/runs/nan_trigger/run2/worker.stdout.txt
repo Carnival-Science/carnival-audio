@@ -1,0 +1,6 @@
+probe nonfinite          fail non_finite_output                          output contains NaN or Inf
+probe repeatability      pass fresh_instance_repeatability               byte-identical output and records across two fresh instances
+probe partition          pass static_partition_invariant                 byte-identical output and records across every declared partition
+probe reset              pass reset_clean_state                          post-reset reprocessing matches a fresh instance
+RESULT specimen=com.carnival-science.reference.nan-trigger scenario=defective-nan-trigger-census pass=3 fail=1 skip=0 exit=1
+

@@ -17,12 +17,13 @@ core/stream       stream descriptor, sample clock, WAV replay, generated signals
 core/dsp          sample peak, windowed RMS, peak hold, FFT, stereo correlation
 core/transport    bounded SPSC block ring, source-clock continuity, snapshots
 tests/            integration tests: partitions, WAV round-trip, memory ceiling
-verification/     A−1 verification laboratory; core record formats + neutral CLAP ABI, no implementation yet
+verification/     A−1 laboratory: independent CLAP host, worker, probes, scenarios, reports
 third_party/clap  neutral CLAP 1.2.10 ABI declarations + vendored headers/C probes
                   + private draft Carnival telemetry-capture extension
-adapters/clap     CLAP lifecycle/params/state adapter (M1)
+adapters/clap     CLAP lifecycle/params/state adapter (M1; state schema 4 + tail hooks)
 adapters/         future adapters/wasapi capture (M3)
 products/pulse    Pulse headless CLAP meter (M1); standalone app/editor later
+products/reference/  gain, biquad, delay + defective test-the-tester processors (M2)
 research/         (not created) isolated execution research
 ```
 
@@ -51,10 +52,11 @@ research/         isolated; no product or adapter imports
 - `verification/` depends on core **record formats** only. It must never import
   `core/dsp`, `adapters/` or `products/`: its numerical references have to be
   independent of the implementation under test, and the import boundary makes
-  that structural. Today the canonical record declaration is
-  `Measurement_Snapshot` inside `core/transport`; before A−1 consumes it,
-  extract that declaration into a small core records package so verification
-  links the format without the ring implementation.
+  that structural. The A−1 laboratory reads the canonical measurement record
+  through the draft telemetry extension declared in `third_party/clap`, and it
+  computes expectations with verification-local peak/RMS/DFT code. The
+  `Measurement_Snapshot` presentation record remains in `core/transport`; it is
+  not the verification wire format.
 - `verification/` **may** import `third_party/clap`: verification is an
   independent host, so it needs the protocol declaration. Sharing an ABI
   declaration is not sharing the implementation; sharing the DSP that computes
@@ -192,6 +194,14 @@ accumulators, holds, validity latches and canonical records in processing state.
 Milestone 2 preparation adds schema 3 (one product flag word for capture mode)
 and separates audio-domain from capture-domain validity.
 
+Milestone 2 adds an optional schema-4 processing-state blob to the generic
+adapter for processors whose output must continue from saved state (the
+reference biquad history and feedback-delay line). The blob is plugin-owned
+bytes framed by a length; it is not a general DSP-state promise, and schemas
+1–3 load with a fresh processing state. Reference processors also use an
+optional `clap.tail` hook; Pulse still reports a zero tail and does not
+serialize processing state.
+
 ## Milestone 2 preparation
 
 The M1 review found two issues, fixed without changing the audio contract:
@@ -214,6 +224,41 @@ The M1 review found two issues, fixed without changing the audio contract:
 The exact Milestone 1 validated plugin binary is preserved under
 `docs/benchmarks/clap-milestone1-validation-2026-11-22/artifacts/` because Odin
 DLL builds are not byte-reproducible.
+
+## Milestone 2 verification laboratory
+
+`verification/` is the A−1 behavioral laboratory (Alicorn#236). It is
+separate from the products in both directions:
+
+- `verification/host` loads `.clap` shared libraries through `core:dynlib` and
+  speaks the neutral `third_party/clap` ABI. It does not import `adapters/clap`
+  or any product.
+- `verification/lab` owns the deterministic scenario/evidence schemas, the
+  independent numerical references (seeded generator, peak/RMS, naive O(n²)
+  DFT), the WAV writer, hashing, the numeric-environment fingerprint and the
+  probes.
+- `verification/worker` is one fresh process per run: scenario in, evidence
+  JSON/CSV/WAV out. Exit 0 = all probes pass, 1 = specimen probe failure,
+  2 = laboratory failure. The runner preserves failure stderr/stdout and
+  partial artifacts.
+- `tools/run_verification.ps1` builds the products, reference processors and
+  worker, spawns workers under a watchdog, checks declarations of expected
+  specimen failures/classes, compares cross-process artifact hashes, and writes
+  a dated `verification/reports/` census, manifest and report.
+
+Probe classes are kept distinct: static partition invariance is strict; the
+automation probe labels `automation_partition_sensitive_control_rate` for the
+adapter's documented block-start application, and can observe
+`automation_partition_invariant_observed` for a plugin that applies events at
+sample offsets (the third-party census specimen does). Tail and perturbation
+probes report measured windows and explicit applicability instead of inferring
+convergence.
+
+The census includes Pulse, three good reference processors
+(`products/reference/gain`, `biquad`, `delay`), three deliberately defective
+fixtures (block-boundary smoother, leaky delay, NaN trigger), and one small
+pinned MIT third-party CLAP binary with provenance. See
+`verification/README.md` and `verification/reports/`.
 
 ## Milestone 0 scope
 

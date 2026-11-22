@@ -1,0 +1,47 @@
+{
+  "schema": "carnival.verification.scenario/1",
+  "name": "reference-delay-census",
+  "description": "Feedback delay reference: persistent processing state, bounded tail, schema-4 processing blob for state restoration.",
+  "specimen": { "id": "com.carnival-science.reference.delay", "class": "reference", "path": "out/reference/delay.clap" },
+  "sample_rate": 48000,
+  "max_block_frames": 1024,
+  "input": {
+    "kind": "sine",
+    "frames": 16384,
+    "frequency_hz": 3000,
+    "amplitude": 0.5,
+    "channel_scale": [1.0, 0.5],
+    "seed": 12345,
+    "impulse_frame": 4096,
+    "dc_value": 0.0
+  },
+  "params": [
+    { "id": 2201, "value": 64 },
+    { "id": 2202, "value": 0.5 },
+    { "id": 2203, "value": 1.0 }
+  ],
+  "partitions": [
+    { "name": "64", "block_sizes": [64] },
+    { "name": "128", "block_sizes": [128] },
+    { "name": "256", "block_sizes": [256] },
+    { "name": "512", "block_sizes": [512] },
+    { "name": "997", "block_sizes": [997] },
+    { "name": "irregular", "irregular_seed": 987654321 }
+  ],
+  "telemetry": { "enabled": false },
+  "measurement": { "enabled": false },
+  "automation": {
+    "enabled": true,
+    "events": [
+      { "frame": 1000, "param_id": 2201, "value": 128 },
+      { "frame": 5000, "param_id": 2201, "value": 32 },
+      { "frame": 9000, "param_id": 2201, "value": 64 }
+    ],
+    "partitions": ["64", "512", "997"]
+  },
+  "state": { "round_trip": true, "migration": false, "fixtures": [] },
+  "tail": { "silence_frames": 24000, "threshold_db": -90 },
+  "perturbation": { "delta_frame": 1000, "delta": 0.25 },
+  "isolation": { "enabled": true, "alt_params": [ { "id": 2201, "value": 128 } ] },
+  "probes": ["nonfinite", "repeatability", "partition", "automation", "state", "isolation", "reset", "tail", "perturbation"]
+}

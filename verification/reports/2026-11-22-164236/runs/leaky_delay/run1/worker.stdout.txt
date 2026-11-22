@@ -1,0 +1,10 @@
+probe nonfinite          pass non_finite_output                          32768 output samples, all finite
+probe repeatability      pass fresh_instance_repeatability               byte-identical output and records across two fresh instances
+probe partition          pass static_partition_invariant                 byte-identical output and records across every declared partition
+probe state              fail authoring_state_and_migration              output after a state restore diverges from the uninterrupted run (processing state missing)
+probe isolation          pass instance_isolation                         both interleaved instances match their solo runs
+probe reset              pass reset_clean_state                          post-reset reprocessing matches a fresh instance
+probe tail               pass tail_boundedness                           tail fell below -90.0 dBFS after 1023 frames (declared hint 1280)
+probe perturbation       pass paired_input_response                      delta at frame 1000 affects 4481 output frames starting at 1000
+RESULT specimen=com.carnival-science.reference.leaky-delay scenario=defective-leaky-delay-census pass=7 fail=1 skip=0 exit=1
+

@@ -91,6 +91,17 @@ Meter :: struct {
 	// Processing state (never serialized as authoring state).
 	epoch:        u64,
 	frame_clock:  i64,
+	// Host-clock discontinuity tracking. CLAP's steady_time is sample-accurate
+	// while a host processes continuously; a forward jump means the host skipped
+	// source frames. Pulse reports that skip to the transport ring as a gap
+	// instead of silently concatenating unrelated audio. A backward or repeated
+	// steady_time is ignored (not treated as a discontinuity).
+	last_steady_time:   i64,
+	last_block_frames:  int,
+	steady_initialized: bool,
+	// Continuity segment of the last block fed to analysis. A segment change
+	// restarts the RMS window so no window straddles a gap.
+	processed_segment: u64,
 	overall_peak: dsp.Peak_Accumulator,
 	window_peak:  dsp.Peak_Accumulator,
 	rms:          dsp.RMS_Window,
@@ -209,6 +220,10 @@ meter_activate :: proc(meter: ^Meter, config: adapter.Activation_Config) -> bool
 	meter.last_rms_start = 0
 	meter.processed_blocks = 0
 	meter.record_generation = 0
+	meter.last_steady_time = 0
+	meter.last_block_frames = 0
+	meter.steady_initialized = false
+	meter.processed_segment = 0
 	meter_reset_analysis(meter)
 	return true
 }
@@ -257,6 +272,10 @@ meter_reset :: proc(meter: ^Meter) {
 	meter.last_rms_start = 0
 	meter.processed_blocks = 0
 	meter.record_generation = 0
+	meter.last_steady_time = 0
+	meter.last_block_frames = 0
+	meter.steady_initialized = false
+	meter.processed_segment = 0
 	meter_reset_analysis(meter)
 	transport.snapshot_publisher_reset(&meter.publisher)
 }
@@ -286,6 +305,21 @@ meter_process :: proc(meter: ^Meter, request: ^adapter.Process_Request) -> adapt
 	}
 	frames := int(request.frames)
 	meter_apply_configuration(meter, request.params)
+
+	// A forward jump in the host's steady sample clock means source frames were
+	// skipped. Advance the absolute frame clock before pushing the block so the
+	// transport ring records the lost range and analysis starts a new segment.
+	if request.steady_time >= 0 {
+		if meter.steady_initialized {
+			expected := meter.last_steady_time + i64(meter.last_block_frames)
+			if request.steady_time > expected {
+				meter.frame_clock += request.steady_time - expected
+			}
+		}
+		meter.last_block_frames = frames
+		meter.last_steady_time = request.steady_time
+		meter.steady_initialized = true
+	}
 
 	// Pass through sample-for-sample, and build the interleaved analysis copy.
 	input_channels: [CHANNELS][^]f32
@@ -378,6 +412,16 @@ meter_drain_ring :: proc(meter: ^Meter) {
 		}
 		if read.frames <= 0 {
 			continue
+		}
+		// A continuity segment change means this block does not follow the
+		// previous one. The audio domain is already latched invalid; restart the
+		// RMS window here so no window straddles the gap and post-gap windows
+		// align with absolute frames again.
+		if read.continuity_epoch != meter.processed_segment {
+			meter.processed_segment = read.continuity_epoch
+			meter.have_window = false
+			_ = dsp.rms_window_init(&meter.rms, meter.window_frames, CHANNELS, read.start_frame)
+			dsp.peak_accumulator_reset(&meter.window_peak)
 		}
 		meter_analyze_block(meter, stream.Audio_Block{
 			start_frame = read.start_frame,

@@ -1,0 +1,39 @@
+{
+  "schema": "carnival.verification.scenario/1",
+  "name": "defective-leaky-delay-census",
+  "description": "Feedback delay whose saved state omits the delay line. The state-restoration probe MUST fail while partition, tail and isolation remain well behaved.",
+  "specimen": { "id": "com.carnival-science.reference.leaky-delay", "class": "defective", "path": "out/reference/leaky_delay.clap" },
+  "sample_rate": 48000,
+  "max_block_frames": 1024,
+  "input": {
+    "kind": "sine",
+    "frames": 16384,
+    "frequency_hz": 3000,
+    "amplitude": 0.5,
+    "channel_scale": [1.0, 0.5],
+    "seed": 12345,
+    "impulse_frame": 4096,
+    "dc_value": 0.0
+  },
+  "params": [
+    { "id": 2401, "value": 64 },
+    { "id": 2402, "value": 0.5 },
+    { "id": 2403, "value": 1.0 }
+  ],
+  "partitions": [
+    { "name": "64", "block_sizes": [64] },
+    { "name": "128", "block_sizes": [128] },
+    { "name": "256", "block_sizes": [256] },
+    { "name": "512", "block_sizes": [512] },
+    { "name": "997", "block_sizes": [997] },
+    { "name": "irregular", "irregular_seed": 987654321 }
+  ],
+  "telemetry": { "enabled": false },
+  "measurement": { "enabled": false },
+  "automation": { "enabled": false, "events": [] },
+  "state": { "round_trip": true, "migration": false, "fixtures": [] },
+  "tail": { "silence_frames": 24000, "threshold_db": -90 },
+  "perturbation": { "delta_frame": 1000, "delta": 0.25 },
+  "isolation": { "enabled": true, "alt_params": [ { "id": 2401, "value": 128 } ] },
+  "probes": ["nonfinite", "repeatability", "partition", "state", "isolation", "reset", "tail", "perturbation"]
+}

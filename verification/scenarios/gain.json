@@ -1,0 +1,43 @@
+{
+  "schema": "carnival.verification.scenario/1",
+  "name": "reference-gain-census",
+  "description": "Stateless gain reference: exact per-sample multiply, expected byte-identical across partitions and fresh processes. Automation is control-rate at block boundaries.",
+  "specimen": { "id": "com.carnival-science.reference.gain", "class": "reference", "path": "out/reference/gain.clap" },
+  "sample_rate": 48000,
+  "max_block_frames": 1024,
+  "input": {
+    "kind": "sine",
+    "frames": 16384,
+    "frequency_hz": 3000,
+    "amplitude": 0.5,
+    "channel_scale": [1.0, 0.5],
+    "seed": 12345,
+    "impulse_frame": 4096,
+    "dc_value": 0.0
+  },
+  "params": [ { "id": 2001, "value": 0.5 } ],
+  "partitions": [
+    { "name": "64", "block_sizes": [64] },
+    { "name": "128", "block_sizes": [128] },
+    { "name": "256", "block_sizes": [256] },
+    { "name": "512", "block_sizes": [512] },
+    { "name": "997", "block_sizes": [997] },
+    { "name": "irregular", "irregular_seed": 987654321 }
+  ],
+  "telemetry": { "enabled": false },
+  "measurement": { "enabled": false },
+  "automation": {
+    "enabled": true,
+    "events": [
+      { "frame": 1000, "param_id": 2001, "value": 0.25 },
+      { "frame": 5000, "param_id": 2001, "value": 1.0 },
+      { "frame": 9000, "param_id": 2001, "value": 0.75 }
+    ],
+    "partitions": ["64", "512", "997"]
+  },
+  "state": { "round_trip": true, "migration": false, "fixtures": [] },
+  "tail": { "silence_frames": 12000, "threshold_db": -90 },
+  "perturbation": { "delta_frame": 1000, "delta": 0.25 },
+  "isolation": { "enabled": true, "alt_params": [ { "id": 2001, "value": 0.25 } ] },
+  "probes": ["nonfinite", "repeatability", "partition", "automation", "state", "isolation", "reset", "tail", "perturbation"]
+}

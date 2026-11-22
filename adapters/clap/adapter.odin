@@ -23,6 +23,7 @@ import clap "carnival:third_party/clap/abi"
 
 MAX_PARAMS :: 32
 MAX_STATE_BYTES :: 4096
+MAX_STATE_BLOB_BYTES :: 4 << 20
 STATE_HEADER_BYTES :: 16
 
 // ---------------------------------------------------------------------------
@@ -131,6 +132,20 @@ Definition :: struct {
 	// state_schema >= 3.
 	state_flags_save: proc(data: rawptr) -> u32,
 	state_flags_load: proc(data: rawptr, flags: u32),
+	// Optional processing-state blob appended to state schema 4 and later.
+	// This is for processors whose output after a state restore must continue
+	// from the saved processing state (for example a delay line or a filter
+	// history). It is not a general DSP-state promise: the plugin owns the
+	// bytes, the adapter only frames them with a length. All three hooks must
+	// be set together, and a definition that sets them must use
+	// state_schema >= 4. Schema 1..3 files load with the processing state at
+	// its fresh (reset) values.
+	state_blob_size: proc(data: rawptr) -> u32,
+	state_blob_save: proc(data: rawptr, stream: ^clap.OStream) -> bool,
+	state_blob_load: proc(data: rawptr, bytes: []u8) -> bool,
+	// Optional declared tail length in frames. The adapter's clap.tail
+	// extension reports this value; a nil hook reports zero.
+	tail_frames: proc(data: rawptr) -> u32,
 }
 
 // ---------------------------------------------------------------------------
@@ -242,6 +257,13 @@ factory_create_plugin :: proc "c" (factory: ^clap.Plugin_Factory, host: ^clap.Ho
 	}
 	if (definition.state_flags_save != nil || definition.state_flags_load != nil) &&
 		definition.state_schema < 3 {
+		return nil
+	}
+	blob_hooks := 0
+	if definition.state_blob_size != nil { blob_hooks += 1 }
+	if definition.state_blob_save != nil { blob_hooks += 1 }
+	if definition.state_blob_load != nil { blob_hooks += 1 }
+	if blob_hooks != 0 && (blob_hooks != 3 || definition.state_schema < 4) {
 		return nil
 	}
 	if definition.backend == nil || definition.backend.create == nil || definition.backend.process == nil {
@@ -795,11 +817,14 @@ write_c_string :: proc "c" (buffer: [^]u8, capacity: u32, text: string) {
 //
 //   magic[8] | u32 schema | u32 param_count | param_count * (u32 id, f64 value)
 //            [| u32 product_flags]        (schema 3+ with a flags hook)
+//            [| u32 blob_length | bytes]  (schema 4+ with blob hooks)
 //
 // Schema 1 contained parameters 1001..1003. Schema 2 adds 1004; loading a v1
 // fixture leaves 1004 at its descriptor default. Schema 3 appends a product
 // flag word (Pulse uses bit 0 for telemetry capture mode); loading a v1/v2
-// fixture leaves the flags at the product default. All fields are
+// fixture leaves the flags at the product default. Schema 4 optionally appends
+// a plugin-owned processing-state blob (reference biquad/delay); loading an
+// older fixture leaves processing state at its fresh values. All fields are
 // native-endian (the supported targets are little-endian); no cross-endian
 // claim is made.
 // ---------------------------------------------------------------------------
@@ -835,7 +860,24 @@ state_save :: proc "c" (plugin: ^clap.Plugin, stream: ^clap.OStream) -> bool {
 		put_u32(buffer[:], offset, definition.state_flags_save(instance.data))
 		offset += 4
 	}
-	return write_all(stream, buffer[:offset])
+	if !write_all(stream, buffer[:offset]) {
+		return false
+	}
+	if definition.state_blob_save != nil {
+		size := definition.state_blob_size(instance.data)
+		if size > MAX_STATE_BLOB_BYTES {
+			return false
+		}
+		header: [4]u8
+		put_u32(header[:], 0, size)
+		if !write_all(stream, header[:]) {
+			return false
+		}
+		if !definition.state_blob_save(instance.data, stream) {
+			return false
+		}
+	}
+	return true
 }
 
 @(private)
@@ -887,12 +929,49 @@ state_load :: proc "c" (plugin: ^clap.Plugin, stream: ^clap.IStream) -> bool {
 		}
 		flags = get_u32(flag_bytes[:], 0)
 	}
+	blob: []u8
+	if schema >= 4 {
+		// A schema-4 stream carries a processing-state blob. A definition that
+		// implements schema 4 must provide the load hook, and the bytes are
+		// validated before any parameter or state is committed.
+		if definition.state_blob_load == nil {
+			return false
+		}
+		length_bytes: [4]u8
+		if !read_all(stream, length_bytes[:]) {
+			return false
+		}
+		length := get_u32(length_bytes[:], 0)
+		if length > MAX_STATE_BLOB_BYTES {
+			return false
+		}
+		if length > 0 {
+			allocated, err := mem.alloc_bytes(int(length), 1, runtime.default_allocator())
+			if err != .None || allocated == nil {
+				return false
+			}
+			blob = mem.slice_data_cast([]u8, allocated)
+			if !read_all(stream, blob) {
+				mem.free(raw_data(blob), runtime.default_allocator())
+				return false
+			}
+		}
+	}
 	// Commit only after the whole stream has been validated.
 	for _, index in definition.params {
 		sync.atomic_store_explicit(&instance.param_values[index], transmute(u64)values[index], .Release)
 	}
 	if definition.state_flags_load != nil {
 		definition.state_flags_load(instance.data, flags)
+	}
+	if definition.state_blob_load != nil {
+		loaded := definition.state_blob_load(instance.data, blob)
+		if blob != nil {
+			mem.free(raw_data(blob), runtime.default_allocator())
+		}
+		if !loaded {
+			return false
+		}
 	}
 	// CLAP state load is a main-thread authoring operation; tell the host that
 	// cached parameter values changed. Some hosts (and clap-validator) require
@@ -974,8 +1053,12 @@ latency_get :: proc "c" (plugin: ^clap.Plugin) -> u32 {
 
 @(private)
 tail_get :: proc "c" (plugin: ^clap.Plugin) -> u32 {
-	_ = plugin
-	return 0
+	instance := instance_of(plugin)
+	if instance == nil || instance.definition.tail_frames == nil {
+		return 0
+	}
+	context = runtime.default_context()
+	return instance.definition.tail_frames(instance.data)
 }
 
 // ---------------------------------------------------------------------------

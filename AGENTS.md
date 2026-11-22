@@ -62,13 +62,15 @@ here is extracted yet.
   `core/` may import Odin `core:` packages and its sibling core packages only.
   It **must not import alicorn, SDL, miniaudio, WASAPI/ALSA/CoreAudio, CLAP,
   `third_party/`, `adapters/`, `products/` or `verification/`.**
-- `verification/` — independent verification laboratory. No implementation
-  yet; Milestone 2 follows Milestone 1. It may import core record formats and the
-  neutral `third_party/clap` ABI declarations but **must not import `core/dsp`,
-  `adapters/` or `products/`**, and its numerical references must not share
-  Pulse's DSP implementation. Sharing the CLAP protocol declaration is fine;
-  sharing the DSP that computes expected results is not. See
-  `verification/AGENTS.md`.
+- `verification/` — independent A−1 laboratory. It holds the independent CLAP
+  host (`host/`), verification-local references and probes (`lab/`), the
+  fresh-process worker (`worker/`), deterministic scenarios, and dated evidence
+  reports. It may import core record formats and the neutral `third_party/clap`
+  ABI declarations but **must not import `core/dsp`, `adapters/` or
+  `products/`**, and its numerical references must not share Pulse's DSP
+  implementation. Sharing the CLAP protocol declaration is fine; sharing the
+  DSP that computes expected results is not. Run
+  `.\tools\run_verification.ps1` for the census. See `verification/AGENTS.md`.
 - `third_party/` — neutral protocol/ABI surface. `third_party/clap` holds the
   CLAP 1.2.10 foreign declarations, the vendored MIT header subset, the C
   ABI proof probes, and one clearly marked private draft extension for
@@ -88,8 +90,11 @@ here is extracted yet.
   direction.
 - `products/` — `products/pulse` currently implements the headless CLAP meter
   backend and entry point; the standalone application/editor (`#131`) follows.
-  It may import `adapters/`, `core/` and `third_party/clap`; only the future
-  standalone/editor target may import Alicorn.
+  `products/reference/` holds gain, biquad and feedback-delay reference
+  processors plus deliberately defective test-the-tester fixtures, built from
+  the same adapter. `products/` may import `adapters/`, `core/` and
+  `third_party/clap`; only the future standalone/editor target may import
+  Alicorn.
 - `research/` — **architectural destination, not created yet.** Isolated
   execution research; no product or adapter imports.
 
@@ -99,9 +104,11 @@ here is extracted yet.
 
 ## Checks
 
-Run `.\tools\test.ps1` before proposing changes. Keep the real-time callback
-free of allocation, locking, I/O, and rendering work; analysis overrun must
-produce explicit invalid state, never silently valid readings.
+Run `.\tools\test.ps1` before proposing changes, and
+`.\tools\run_verification.ps1` when a behavioral or state change should produce
+fresh laboratory evidence. Keep the real-time callback free of allocation,
+locking, I/O, and rendering work; analysis overrun must produce explicit
+invalid state, never silently valid readings.
 
 ## Conventions
 

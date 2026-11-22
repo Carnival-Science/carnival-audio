@@ -1,0 +1,51 @@
+{
+  "schema": "carnival.verification.scenario/1",
+  "name": "third-party-distortion-census",
+  "description": "Small third-party census: baconpaul/clap-c99-distortion (MIT), a pure C99 stereo distortion with three parameters and state save/load. Its sample-offset event application makes automation partition-invariant, a useful contrast with our block-start adapter contract.",
+  "specimen": {
+    "id": "org.surge-synth-team.clap-c99-distortion",
+    "class": "third_party",
+    "path": "verification/specimens/third_party/clap-c99-distortion/clap-c99-distortion.clap"
+  },
+  "sample_rate": 48000,
+  "max_block_frames": 1024,
+  "input": {
+    "kind": "sine",
+    "frames": 16384,
+    "frequency_hz": 3000,
+    "amplitude": 0.5,
+    "channel_scale": [1.0, 0.5],
+    "seed": 12345,
+    "impulse_frame": 4096,
+    "dc_value": 0.0
+  },
+  "params": [
+    { "id": 2112, "value": 2.0 },
+    { "id": 8675309, "value": 0.5 },
+    { "id": 5150, "value": 0 }
+  ],
+  "partitions": [
+    { "name": "64", "block_sizes": [64] },
+    { "name": "128", "block_sizes": [128] },
+    { "name": "256", "block_sizes": [256] },
+    { "name": "512", "block_sizes": [512] },
+    { "name": "997", "block_sizes": [997] },
+    { "name": "irregular", "irregular_seed": 987654321 }
+  ],
+  "telemetry": { "enabled": false },
+  "measurement": { "enabled": false },
+  "automation": {
+    "enabled": true,
+    "events": [
+      { "frame": 1000, "param_id": 2112, "value": 0.0 },
+      { "frame": 5000, "param_id": 2112, "value": 4.0 },
+      { "frame": 9000, "param_id": 2112, "value": 1.0 }
+    ],
+    "partitions": ["64", "512", "997"]
+  },
+  "state": { "round_trip": true, "migration": false, "fixtures": [] },
+  "tail": { "silence_frames": 12000, "threshold_db": -90 },
+  "perturbation": { "delta_frame": 1000, "delta": 0.25 },
+  "isolation": { "enabled": true, "alt_params": [ { "id": 2112, "value": 0.0 } ] },
+  "probes": ["nonfinite", "repeatability", "partition", "automation", "state", "isolation", "reset", "tail", "perturbation"]
+}

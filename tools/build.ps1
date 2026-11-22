@@ -24,7 +24,27 @@ foreach ($package in $packages) {
     }
 }
 
-Write-Host "build: ok ($($packages.Count) packages)"
+# Optional layers: reference processors and the verification laboratory. Each
+# reference plugin package is a separate package because one DLL hosts exactly
+# one CLAP plugin.
+$optionalPackages = @()
+foreach ($plugin in Get-PulseReferencePlugins) {
+    $optionalPackages += $plugin.Package
+}
+$optionalPackages += Get-PulseVerificationPackages
+foreach ($package in $optionalPackages) {
+    $path = Join-Path $repoRoot $package
+    if (-not (Test-Path -LiteralPath $path -PathType Container)) {
+        continue
+    }
+    Write-Host "check $package"
+    & $Odin check $path "-collection:carnival=$repoRoot" -vet -warnings-as-errors -no-entry-point
+    if ($LASTEXITCODE -ne 0) {
+        exit $LASTEXITCODE
+    }
+}
+
+Write-Host "build: ok ($($packages.Count) packages + optional)"
 
 # Windows CLAP artifacts are a single DLL whose file name ends in `.clap`; see
 # the CLAP entry-point documentation (there is no bundle directory on Windows).
@@ -37,4 +57,11 @@ if ($LASTEXITCODE -ne 0) {
     exit $LASTEXITCODE
 }
 Write-Host "build: plugin ok"
+
+# Reference processors and the verification worker. Building them here keeps a
+# single entry point for a local laboratory run.
+& "$PSScriptRoot\build_reference.ps1" -Odin $Odin
+if ($LASTEXITCODE -ne 0) {
+    exit $LASTEXITCODE
+}
 exit 0

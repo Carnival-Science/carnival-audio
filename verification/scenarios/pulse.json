@@ -1,0 +1,157 @@
+{
+  "schema": "carnival.verification.scenario/1",
+  "name": "pulse-canonical-census",
+  "description": "Pulse headless CLAP meter: canonical records against verification-local peak/RMS, partition invariance, automation class, state migration, isolation, capture episodes, overflow and host-clock gaps.",
+  "specimen": {
+    "id": "com.carnival-science.pulse.meter",
+    "class": "product",
+    "path": "out/pulse.clap"
+  },
+  "sample_rate": 48000,
+  "max_block_frames": 1024,
+  "input": {
+    "kind": "sine",
+    "frames": 16384,
+    "frequency_hz": 3000,
+    "amplitude": 0.5,
+    "channel_scale": [1.0, 0.5],
+    "seed": 12345,
+    "impulse_frame": 4096,
+    "dc_value": 0.0
+  },
+  "params": [
+    { "id": 1001, "value": 512 },
+    { "id": 1002, "value": 96000 },
+    { "id": 1003, "value": 0 },
+    { "id": 1004, "value": 0 }
+  ],
+  "partitions": [
+    { "name": "64", "block_sizes": [64] },
+    { "name": "128", "block_sizes": [128] },
+    { "name": "256", "block_sizes": [256] },
+    { "name": "512", "block_sizes": [512] },
+    { "name": "997", "block_sizes": [997] },
+    { "name": "irregular", "irregular_seed": 987654321 }
+  ],
+  "telemetry": {
+    "enabled": true,
+    "drain_per_block": false,
+    "overflow": false
+  },
+  "transport": {
+    "enabled": true,
+    "playing": true,
+    "tempo": 120,
+    "position_seconds": 0
+  },
+  "measurement": {
+    "enabled": true,
+    "window_frames": 512,
+    "hold_frames": 96000,
+    "hold_decay": false,
+    "schema_version": 1
+  },
+  "automation": {
+    "enabled": true,
+    "events": [
+      { "frame": 1000, "param_id": 1001, "value": 256 },
+      { "frame": 2500, "param_id": 1001, "value": 512 },
+      { "frame": 3000, "param_id": 1002, "value": 128 },
+      { "frame": 5000, "param_id": 1001, "value": 128 },
+      { "frame": 7000, "param_id": 1002, "value": 96000 },
+      { "frame": 9000, "param_id": 1001, "value": 1024 }
+    ],
+    "partitions": ["64", "512", "997"]
+  },
+  "state": {
+    "round_trip": true,
+    "migration": true,
+    "fixtures": [
+      {
+        "name": "schema1",
+        "schema": 1,
+        "hex": "435350554c5345310100000003000000e90300000000000000008040ea0300000000000000000000eb0300000000000000000000",
+        "expect_params": [
+          { "id": 1001, "value": 512 },
+          { "id": 1002, "value": 0 },
+          { "id": 1003, "value": 0 },
+          { "id": 1004, "value": 20 }
+        ],
+        "expect_capture": false,
+        "note": "Schema 1 has IDs 1001..1003; 1004 keeps the descriptor default 20. No flag word, capture off."
+      },
+      {
+        "name": "schema2",
+        "schema": 2,
+        "hex": "435350554c5345310200000004000000e90300000000000000007040ea0300000000000000c0b240eb030000000000000000f03fec0300000000000000004440",
+        "expect_params": [
+          { "id": 1001, "value": 256 },
+          { "id": 1002, "value": 4800 },
+          { "id": 1003, "value": 1 },
+          { "id": 1004, "value": 40 }
+        ],
+        "expect_capture": false,
+        "note": "Schema 2 adds ID 1004. No flag word, capture off."
+      },
+      {
+        "name": "schema3-capture-on",
+        "schema": 3,
+        "hex": "435350554c5345310300000004000000e90300000000000000009040ea0300000000000000c0c240eb030000000000000000f03fec030000000000000000294001000000",
+        "expect_params": [
+          { "id": 1001, "value": 1024 },
+          { "id": 1002, "value": 9600 },
+          { "id": 1003, "value": 1 },
+          { "id": 1004, "value": 12.5 }
+        ],
+        "expect_capture": true,
+        "note": "Schema 3 flag bit 0 set: the verification capture mode survives save/load."
+      },
+      {
+        "name": "schema3-capture-off",
+        "schema": 3,
+        "hex": "435350554c5345310300000004000000e9030000000000000000a040ea0300000000000000c0b240eb0300000000000000000000ec030000000000000000344000000000",
+        "expect_params": [
+          { "id": 1001, "value": 2048 },
+          { "id": 1002, "value": 4800 },
+          { "id": 1003, "value": 0 },
+          { "id": 1004, "value": 20 }
+        ],
+        "expect_capture": false,
+        "note": "Schema 3 with flag word zero: capture off."
+      }
+    ]
+  },
+  "tail": {
+    "silence_frames": 24000,
+    "threshold_db": -90
+  },
+  "perturbation": {
+    "delta_frame": 1000,
+    "delta": 0.25
+  },
+  "gaps": [
+    { "start_frame": 4096, "frames": 512 }
+  ],
+  "isolation": {
+    "enabled": true,
+    "alt_params": [
+      { "id": 1001, "value": 1024 }
+    ]
+  },
+  "probes": [
+    "measurement",
+    "spectrum",
+    "nonfinite",
+    "repeatability",
+    "partition",
+    "automation",
+    "state",
+    "isolation",
+    "reset",
+    "tail",
+    "perturbation",
+    "capture_toggle",
+    "capture_overflow",
+    "gap"
+  ]
+}

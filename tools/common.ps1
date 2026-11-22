@@ -66,3 +66,24 @@ function Get-PulsePackages {
     }
     return $packages
 }
+
+# Verification reference processors. Each is its own DLL (one CLAP plugin per
+# DSO on this host), built like Pulse from the same adapter.
+function Get-PulseReferencePlugins {
+    return @(
+        @{ Package = 'products/reference/gain';          Output = 'gain.clap' },
+        @{ Package = 'products/reference/biquad';        Output = 'biquad.clap' },
+        @{ Package = 'products/reference/delay';         Output = 'delay.clap' },
+        @{ Package = 'products/reference/block_smoother'; Output = 'block_smoother.clap' },
+        @{ Package = 'products/reference/leaky_delay';   Output = 'leaky_delay.clap' },
+        @{ Package = 'products/reference/nan_trigger';   Output = 'nan_trigger.clap' }
+    )
+}
+
+function Get-PulseVerificationPackages {
+    return @(
+        'verification/host',
+        'verification/lab',
+        'verification/worker'
+    )
+}

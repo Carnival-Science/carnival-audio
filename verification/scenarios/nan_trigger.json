@@ -1,0 +1,32 @@
+{
+  "schema": "carnival.verification.scenario/1",
+  "name": "defective-nan-trigger-census",
+  "description": "Deliberately defective processor that emits NaN for |sample| >= 0.95. The non-finite probe MUST fail; repeatability and partition hashes stay deterministic because the NaN payload is fixed.",
+  "specimen": { "id": "com.carnival-science.reference.nan-trigger", "class": "defective", "path": "out/reference/nan_trigger.clap" },
+  "sample_rate": 48000,
+  "max_block_frames": 1024,
+  "input": {
+    "kind": "sine",
+    "frames": 16384,
+    "frequency_hz": 3000,
+    "amplitude": 1.0,
+    "channel_scale": [1.0, 0.5],
+    "seed": 12345,
+    "impulse_frame": 4096,
+    "dc_value": 0.0
+  },
+  "params": [],
+  "partitions": [
+    { "name": "64", "block_sizes": [64] },
+    { "name": "512", "block_sizes": [512] },
+    { "name": "997", "block_sizes": [997] }
+  ],
+  "telemetry": { "enabled": false },
+  "measurement": { "enabled": false },
+  "automation": { "enabled": false, "events": [] },
+  "state": { "round_trip": false, "migration": false, "fixtures": [] },
+  "tail": { "silence_frames": 12000, "threshold_db": -90 },
+  "perturbation": { "delta_frame": 1000, "delta": 0.25 },
+  "isolation": { "enabled": false },
+  "probes": ["nonfinite", "repeatability", "partition", "reset"]
+}

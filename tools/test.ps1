@@ -12,8 +12,24 @@ $ErrorActionPreference = 'Stop'
 $Odin = Resolve-PulseOdin -Requested $Odin
 $repoRoot = Get-PulseRepoRoot
 $packages = Get-PulsePackages
+# Verification packages have their own tests. The host integration test needs a
+# built reference specimen; build the reference processors and worker first so
+# the test is meaningful instead of silently skipped.
+foreach ($optional in @('verification/host', 'verification/lab')) {
+    if (Test-Path -LiteralPath (Join-Path $repoRoot $optional) -PathType Container) {
+        $packages += $optional
+    }
+}
 
 Write-Host "odin: $Odin"
+$referenceBuild = Join-Path $PSScriptRoot 'build_reference.ps1'
+if (Test-Path -LiteralPath $referenceBuild -PathType Leaf) {
+    & $referenceBuild -Odin $Odin
+    if ($LASTEXITCODE -ne 0) {
+        exit $LASTEXITCODE
+    }
+    $env:PULSE_VERIFY_GAIN_CLAP = Join-Path $repoRoot 'out\reference\gain.clap'
+}
 & "$PSScriptRoot\check-boundary.ps1"
 if ($LASTEXITCODE -ne 0) {
     exit $LASTEXITCODE

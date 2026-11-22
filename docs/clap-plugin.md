@@ -83,12 +83,25 @@ hold timers, overrun latches and the canonical records are processing state and
 never appear in `clap.state`. The capture-mode flag is the one non-parameter
 authoring bit: it records whether the verification capture was enabled.
 
+The generic adapter also supports an optional **schema-4 processing-state
+blob**: a `u32` length followed by plugin-owned bytes, framed by the adapter
+after the flags word. It exists for processors whose output must continue from
+saved processing state (filter history, delay line). All three blob hooks must
+be set together and require schema 4; loading a schema 1–3 file leaves the
+processing state fresh. Pulse uses schema 3 and does not serialize processing
+state. The reference processors under `products/reference/` use schema 4 and
+also implement the optional `clap.tail` hook.
+
 ## Processing and invalidation
 
 1. The adapter validates the host process struct and copies parameter atomics
    into a bounded stack array. Automation events are applied at block start
    (the meter's settings are control-rate); the audio path never splits a block
-   because of a parameter event.
+   because of a parameter event. A **forward jump in CLAP `steady_time`** larger
+   than the previous block's frame count is treated as a host-side source gap:
+   Pulse advances its absolute frame clock and records the lost range in the
+   transport ledger. The expected next steady time uses the previous block's
+   frame count, so variable-length blocks are not mistaken for gaps.
 2. `products/pulse` copies input to output and builds an interleaved staging
    buffer (`max_frames * 2`, preallocated at activation).
 3. The block is pushed into a bounded SPSC transport ring with its absolute

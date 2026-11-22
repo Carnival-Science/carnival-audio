@@ -732,6 +732,92 @@ test_state_rejects_bad_magic_and_truncation :: proc(t: ^testing.T) {
 	testing.expect(t, state.load(plugin, &istream) == false, "truncated state rejected")
 }
 
+// Processing-state blob hooks used by the schema-4 extension test.
+Blob_Probe :: struct {
+	seen: [4]u8,
+}
+
+blob_load_calls: int
+
+blob_size :: proc(data: rawptr) -> u32 {
+	_ = data
+	return 4
+}
+
+blob_save :: proc(data: rawptr, stream: ^clap.OStream) -> bool {
+	_ = data
+	bytes := [4]u8{0xDE, 0xAD, 0xBE, 0xEF}
+	return stream.write(stream, &bytes[0], u64(len(bytes))) == i64(len(bytes))
+}
+
+blob_load :: proc(data: rawptr, bytes: []u8) -> bool {
+	_ = data
+	blob_load_calls += 1
+	return len(bytes) == 4 && bytes[0] == 0xDE && bytes[3] == 0xEF
+}
+
+@(test)
+test_state_schema4_processing_blob_round_trip :: proc(t: ^testing.T) {
+	definition := new(Definition)
+	defer free(definition)
+	definition^ = test_definition
+	definition.state_schema = 4
+	definition.state_blob_size = blob_size
+	definition.state_blob_save = blob_save
+	definition.state_blob_load = blob_load
+	register_definition(definition)
+	defer entry_deinit()
+	testing.expect(t, entry_init("adapter-test.clap"), "entry_init")
+	factory := cast(^clap.Plugin_Factory)entry_get_factory(cstring(clap.CLAP_PLUGIN_FACTORY_ID))
+	testing.expect(t, factory != nil, "factory")
+	harness := new(Harness)
+	defer free(harness)
+	prepare_harness(harness)
+	plugin := factory.create_plugin(factory, &harness.host, cstring(TEST_DESCRIPTOR_ID))
+	testing.expect(t, plugin != nil, "create")
+	defer plugin.destroy(plugin)
+	testing.expect(t, plugin.init(plugin), "init")
+
+	state := cast(^clap.Plugin_State)plugin.get_extension(plugin, cstring(clap.CLAP_EXT_STATE))
+	params := cast(^clap.Plugin_Params)plugin.get_extension(plugin, cstring(clap.CLAP_EXT_PARAMS))
+	testing.expect(t, state != nil && params != nil, "extensions")
+	testing.expect(t, set_param(plugin, 501, 0.75), "set gain")
+
+	stream := Mem_Stream{}
+	ostream := clap.OStream{ctx = &stream, write = mem_write}
+	testing.expect(t, state.save(plugin, &ostream), "save")
+	// header 16 + two params 24 + blob length 4 + blob 4
+	testing.expect_value(t, stream.size, 48)
+
+	testing.expect(t, set_param(plugin, 501, 0.1), "change gain")
+	blob_load_calls = 0
+	istream := clap.IStream{ctx = &stream, read = mem_read}
+	testing.expect(t, state.load(plugin, &istream), "load")
+	testing.expect_value(t, blob_load_calls, 1)
+	value: f64
+	testing.expect(t, params.get_value(plugin, 501, &value), "read restored")
+	testing.expect_value(t, value, f64(0.75))
+}
+
+@(test)
+test_state_schema4_rejects_incomplete_blob_hooks :: proc(t: ^testing.T) {
+	definition := new(Definition)
+	defer free(definition)
+	definition^ = test_definition
+	definition.state_schema = 4
+	definition.state_blob_size = blob_size
+	register_definition(definition)
+	defer entry_deinit()
+	testing.expect(t, entry_init("adapter-test.clap"), "entry_init")
+	factory := cast(^clap.Plugin_Factory)entry_get_factory(cstring(clap.CLAP_PLUGIN_FACTORY_ID))
+	testing.expect(t, factory != nil, "factory")
+	harness := new(Harness)
+	defer free(harness)
+	prepare_harness(harness)
+	plugin := factory.create_plugin(factory, &harness.host, cstring(TEST_DESCRIPTOR_ID))
+	testing.expect(t, plugin == nil, "partial blob hooks are rejected")
+}
+
 // Counting allocator used to prove the process path performs no allocation
 // through context.allocator/context.temp_allocator.
 Alloc_Probe :: struct {

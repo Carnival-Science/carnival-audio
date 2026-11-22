@@ -55,7 +55,12 @@ direct_destroy :: proc(harness: ^Direct) {
 }
 
 // direct_process feeds one block from interleaved source frames.
-direct_process :: proc(harness: ^Direct, source: []f32, frames: int) -> adapter.Process_Result {
+direct_process :: proc(
+	harness: ^Direct,
+	source: []f32,
+	frames: int,
+	steady_time: i64 = 0,
+) -> adapter.Process_Result {
 	if frames <= 0 || len(source) < frames * CHANNELS {
 		return .Error
 	}
@@ -67,6 +72,7 @@ direct_process :: proc(harness: ^Direct, source: []f32, frames: int) -> adapter.
 	in_ptrs := [2]^f32{&harness.input[0][0], &harness.input[1][0]}
 	out_ptrs := [2]^f32{&harness.output[0][0], &harness.output[1][0]}
 	request := adapter.Process_Request{
+		steady_time = steady_time,
 		frames = u32(frames),
 		channels = CHANNELS,
 		input = cast([^]^f32)&in_ptrs[0],
@@ -1143,3 +1149,71 @@ test_process_timing_observation :: proc(t: ^testing.T) {
 
 
 
+
+@(test)
+test_host_clock_gap_restarts_window_and_invalidates_segment :: proc(t: ^testing.T) {
+	harness := direct_init(t, 1024)
+	defer direct_destroy(&harness)
+	harness.params[PARAM_WINDOW_FRAMES_INDEX] = 128
+	// A fresh meter applies the window parameter on the first block.
+
+	source := make([]f32, 4096 * CHANNELS)
+	defer delete(source)
+	for frame in 0 ..< 4096 {
+		source[frame * 2 + 0] = 0.5
+		source[frame * 2 + 1] = -0.5
+	}
+
+	// Continuous first block: 512 frames at steady 0 -> four valid windows.
+	testing.expect_value(t, direct_process(&harness, source, 512, 0), adapter.Process_Result.Continue)
+	// The host skipped 1000 frames: steady time jumps to 1512. The plugin
+	// records the gap and restarts the RMS window at the new absolute frame.
+	testing.expect_value(t, direct_process(&harness, source, 512, 1512), adapter.Process_Result.Continue)
+	testing.expect_value(t, direct_process(&harness, source, 512, 2024), adapter.Process_Result.Continue)
+
+	drain := Drain{}
+	direct_drain(&harness, &drain)
+	testing.expect(t, drain.count >= 7, "expected pre-gap and post-gap windows")
+
+	// Pre-gap records are aligned to 0,128,256,384 and valid.
+	for index in 0 ..< 4 {
+		record := drain.records[index]
+		testing.expect_value(t, record.start_frame, i64(index * 128))
+		testing.expect(t, record.valid, "pre-gap record is audio-domain valid")
+	}
+	// The next complete window starts at the post-gap absolute frame, not at a
+	// silently concatenated 512. This proves the window did not straddle the
+	// gap and that the lost range is explicit.
+	testing.expect_value(t, drain.records[4].start_frame, i64(1512))
+	testing.expect(t, !drain.records[4].valid, "post-gap record is audio-domain invalid")
+	testing.expect(t, drain.records[4].overrun, "post-gap record keeps the overrun alias")
+}
+
+@(test)
+test_host_clock_variable_block_sizes_do_not_create_false_gaps :: proc(t: ^testing.T) {
+	harness := direct_init(t, 2048)
+	defer direct_destroy(&harness)
+	harness.params[PARAM_WINDOW_FRAMES_INDEX] = 128
+
+	source := make([]f32, 4096 * CHANNELS)
+	defer delete(source)
+	for frame in 0 ..< 4096 {
+		source[frame * 2 + 0] = 0.25
+		source[frame * 2 + 1] = -0.25
+	}
+
+	// Variable-length blocks with a contiguous steady clock. The expected next
+	// steady time uses the previous block's frame count, not the current one;
+	// otherwise 1024 followed by 576 looks like a 448-frame host gap.
+	testing.expect_value(t, direct_process(&harness, source, 1024, 0), adapter.Process_Result.Continue)
+	testing.expect_value(t, direct_process(&harness, source, 576, 1024), adapter.Process_Result.Continue)
+	testing.expect_value(t, direct_process(&harness, source, 576, 1600), adapter.Process_Result.Continue)
+
+	drain := Drain{}
+	direct_drain(&harness, &drain)
+	testing.expect_value(t, drain.count, 17)
+	for index in 0 ..< drain.count {
+		testing.expect_value(t, drain.records[index].start_frame, i64(index * 128))
+		testing.expect(t, drain.records[index].valid, "contiguous variable blocks stay audio-valid")
+	}
+}
