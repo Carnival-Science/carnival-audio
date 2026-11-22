@@ -1,0 +1,10 @@
+probe nonfinite          pass non_finite_output                          32768 output samples, all finite
+probe repeatability      pass fresh_instance_repeatability               byte-identical output and records across two fresh instances
+probe partition          fail static_partition_sensitive                 output or canonical records change with the block partition
+probe state              pass authoring_state_and_migration              authoring round trip restored 1 parameters; continuous state restore checked
+probe isolation          pass instance_isolation                         both interleaved instances match their solo runs
+probe reset              pass reset_clean_state                          post-reset reprocessing matches a fresh instance
+probe tail               pass tail_boundedness                           tail fell below -90.0 dBFS after 0 frames (declared hint 0)
+probe perturbation       pass paired_input_response                      delta at frame 1000 affects 24 output frames starting at 1000
+RESULT specimen=com.carnival-science.reference.block-smoother scenario=defective-block-smoother-census pass=7 fail=1 skip=0 exit=1
+

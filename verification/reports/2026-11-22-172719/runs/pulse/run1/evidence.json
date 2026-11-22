@@ -1,0 +1,884 @@
+{
+  "schema": "carnival.verification.evidence/1",
+  "lab_revision": "m2.0",
+  "abi": "clap-1.2.10",
+  "scenario": {
+    "name": "pulse-canonical-census",
+    "description": "Pulse headless CLAP meter: canonical records against verification-local peak/RMS, partition invariance, automation class, state migration, isolation, capture episodes, overflow and host-clock gaps.",
+    "sha256": "cde970dbd8d69e9ba8a63ed702414c9bd3251f333edb97c8583548292d077510",
+    "plugin_id": "com.carnival-science.pulse.meter",
+    "class": "product"
+  },
+  "specimen": {
+    "path": "C:\\Users\\saman\\dev\\pulse\\out\\pulse.clap",
+    "sha256": "ea7a4fe60a0b423902b10c4e0f47ef3c7861b6daa8fd3b3d29c5d7c36a871568",
+    "descriptor_id": "com.carnival-science.pulse.meter",
+    "name": "Pulse Meter",
+    "vendor": "Carnival Science",
+    "version": "0.1.0",
+    "has_telemetry": true
+  },
+  "environment": {
+    "platform": "windows",
+    "arch": "x86_64",
+    "odin_build": "C:\\odin\\odin.exe version dev-2026-11-nightly:08539cd",
+    "host_revision": "m2.0",
+    "denormals": "preserved",
+    "denormal_probe": "tiny=1e-320 half=5e-321 tiny_nonzero=true half_nonzero=true",
+    "contraction": "separately_rounded",
+    "contraction_probe": "a*b+c=0",
+    "cpu": "AMD Ryzen 5 7600X 6-Core Processor",
+    "git_commit": "c96ae587a436057f016e5c267b8ea92721b9b36f",
+    "note": "observed, not hermetic: no claim of universal determinism or real-time safety"
+  },
+  "probes": [
+    {
+      "id": "measurement",
+      "class": "canonical_measurement",
+      "status": "pass",
+      "applicability": "Applies to specimens exposing the draft telemetry extension. Expected values come from verification-local peak/RMS arithmetic over the input WAV, not from the plugin.",
+      "summary": "32 records match independent peak/RMS/hold references",
+      "metrics": [
+        {
+          "name": "records",
+          "value": "32"
+        },
+        {
+          "name": "expected_records",
+          "value": "32"
+        },
+        {
+          "name": "schema_version",
+          "value": "1"
+        },
+        {
+          "name": "max_sample_peak_abs_diff",
+          "value": "0",
+          "unit": "amplitude"
+        },
+        {
+          "name": "max_rms_abs_diff",
+          "value": "5.06090502839e-10",
+          "unit": "amplitude"
+        },
+        {
+          "name": "max_hold_abs_diff",
+          "value": "0",
+          "unit": "amplitude"
+        },
+        {
+          "name": "peak_frame_mismatches",
+          "value": "0"
+        },
+        {
+          "name": "invalid_records",
+          "value": "0"
+        },
+        {
+          "name": "record_hash_changed_by_perturbation",
+          "value": "true"
+        }
+      ],
+      "details": [
+        "RMS reference: sqrt(sum(x^2)/N) accumulated in f64 from the input samples",
+        "Peak reference: max|x| and its first frame, computed from the input samples",
+        "Tolerance: peak and peak_frame exact; RMS and hold 1e-7 absolute; observed environment recorded separately"
+      ]
+    },
+    {
+      "id": "spectrum",
+      "class": "independent_dft",
+      "status": "pass",
+      "applicability": "Applies to passthrough specimens when the scenario uses an integer-bin sine. Uses the verification-local O(n^2) DFT over a bounded 1024-sample window.",
+      "summary": "O(n^2) DFT peak bin 64 matches the 3000 Hz generator bin",
+      "metrics": [
+        {
+          "name": "dft_window",
+          "value": "1024"
+        },
+        {
+          "name": "peak_bin",
+          "value": "64"
+        },
+        {
+          "name": "expected_bin",
+          "value": "64"
+        },
+        {
+          "name": "peak_magnitude",
+          "value": "0.499999990727"
+        },
+        {
+          "name": "magnitude_abs_diff",
+          "value": "9.27285470631e-09"
+        }
+      ],
+      "details": [
+        "naive_dft is O(n^2) by design; n=1024 here, no FFT and no shared transform code"
+      ]
+    },
+    {
+      "id": "nonfinite",
+      "class": "non_finite_output",
+      "status": "pass",
+      "applicability": "Scans every rendered output sample for NaN/Inf. Applicable to every specimen; a failure is a real output defect for this input.",
+      "summary": "32768 output samples, all finite",
+      "metrics": [
+        {
+          "name": "nonfinite_samples",
+          "value": "0"
+        }
+      ]
+    },
+    {
+      "id": "repeatability",
+      "class": "fresh_instance_repeatability",
+      "status": "pass",
+      "applicability": "Two fresh instances in this process render the same scenario. Cross-process repeatability is checked by the runner repeating the run and comparing artifact hashes.",
+      "summary": "byte-identical output and records across two fresh instances",
+      "metrics": [
+        {
+          "name": "output_hash_1",
+          "value": "4e64f2fc8d77a2d096a5348c1da5a390f9191d46c72a419fc2e0360e276f5a74"
+        },
+        {
+          "name": "output_hash_2",
+          "value": "4e64f2fc8d77a2d096a5348c1da5a390f9191d46c72a419fc2e0360e276f5a74"
+        },
+        {
+          "name": "record_hash_1",
+          "value": "0ff016e7e44982c840cf955754ca5c0b07edf5dbd66f5e0b8edd0d6c42b5fb2a"
+        },
+        {
+          "name": "record_hash_2",
+          "value": "0ff016e7e44982c840cf955754ca5c0b07edf5dbd66f5e0b8edd0d6c42b5fb2a"
+        }
+      ]
+    },
+    {
+      "id": "partition",
+      "class": "static_partition_invariant",
+      "status": "pass",
+      "applicability": "Same absolute input and static parameters rendered under different block partitions. Expected class for stateless and per-sample-state processors is byte-exact invariance; a difference is a specimen failure, not a tolerance question.",
+      "summary": "byte-identical output and records across every declared partition",
+      "metrics": [
+        {
+          "name": "reference_partition",
+          "value": "64"
+        },
+        {
+          "name": "reference_output_hash",
+          "value": "4e64f2fc8d77a2d096a5348c1da5a390f9191d46c72a419fc2e0360e276f5a74"
+        },
+        {
+          "name": "reference_record_hash",
+          "value": "a14f069d55964706aaf72a606c9ac48d328d1438aa04893f24d4527112817449"
+        },
+        {
+          "name": "measure_peak_delta_128",
+          "value": "0"
+        },
+        {
+          "name": "measure_rms_delta_128",
+          "value": "0"
+        },
+        {
+          "name": "measure_hold_delta_128",
+          "value": "0"
+        },
+        {
+          "name": "measure_peak_frame_mismatches_128",
+          "value": "0"
+        },
+        {
+          "name": "measure_peak_delta_256",
+          "value": "0"
+        },
+        {
+          "name": "measure_rms_delta_256",
+          "value": "0"
+        },
+        {
+          "name": "measure_hold_delta_256",
+          "value": "0"
+        },
+        {
+          "name": "measure_peak_frame_mismatches_256",
+          "value": "0"
+        },
+        {
+          "name": "measure_peak_delta_512",
+          "value": "0"
+        },
+        {
+          "name": "measure_rms_delta_512",
+          "value": "0"
+        },
+        {
+          "name": "measure_hold_delta_512",
+          "value": "0"
+        },
+        {
+          "name": "measure_peak_frame_mismatches_512",
+          "value": "0"
+        },
+        {
+          "name": "measure_peak_delta_997",
+          "value": "0"
+        },
+        {
+          "name": "measure_rms_delta_997",
+          "value": "0"
+        },
+        {
+          "name": "measure_hold_delta_997",
+          "value": "0"
+        },
+        {
+          "name": "measure_peak_frame_mismatches_997",
+          "value": "0"
+        },
+        {
+          "name": "measure_peak_delta_irregular",
+          "value": "0"
+        },
+        {
+          "name": "measure_rms_delta_irregular",
+          "value": "0"
+        },
+        {
+          "name": "measure_hold_delta_irregular",
+          "value": "0"
+        },
+        {
+          "name": "measure_peak_frame_mismatches_irregular",
+          "value": "0"
+        },
+        {
+          "name": "partitions",
+          "value": "6"
+        },
+        {
+          "name": "max_output_abs_delta",
+          "value": "0",
+          "unit": "amplitude"
+        }
+      ]
+    },
+    {
+      "id": "automation",
+      "class": "automation_partition_sensitive_control_rate",
+      "status": "pass",
+      "applicability": "Sample-timestamped parameter events are delivered inside CLAP blocks. The adapter under test applies a block's events at block start (documented control-rate semantics), so automation results are expected to be partition-sensitive. This probe labels the observed class; it does not require sample-exact automation.",
+      "summary": "automation changes across 0 audio and 2 record partition comparisons (observed control-rate class)",
+      "metrics": [
+        {
+          "name": "static_output_hash",
+          "value": "4e64f2fc8d77a2d096a5348c1da5a390f9191d46c72a419fc2e0360e276f5a74"
+        },
+        {
+          "name": "automation_output_hash_0",
+          "value": "4e64f2fc8d77a2d096a5348c1da5a390f9191d46c72a419fc2e0360e276f5a74"
+        },
+        {
+          "name": "automation_changes_output",
+          "value": "false"
+        },
+        {
+          "name": "automation_output_hash_512",
+          "value": "4e64f2fc8d77a2d096a5348c1da5a390f9191d46c72a419fc2e0360e276f5a74"
+        },
+        {
+          "name": "automation_record_hash_512",
+          "value": "80c713b3d83128c0a600d3f91cddcd428c55a11a6156f5ba91dfc4cabed05601"
+        },
+        {
+          "name": "automation_output_hash_997",
+          "value": "4e64f2fc8d77a2d096a5348c1da5a390f9191d46c72a419fc2e0360e276f5a74"
+        },
+        {
+          "name": "automation_record_hash_997",
+          "value": "776b526f194f4f8eca3647a75398a1436167d1cf02ec0a451de11fb3734b0de4"
+        },
+        {
+          "name": "automation_partitions",
+          "value": "3"
+        },
+        {
+          "name": "partition_sensitive_pairs",
+          "value": "0"
+        },
+        {
+          "name": "record_partition_sensitive_pairs",
+          "value": "2"
+        },
+        {
+          "name": "max_output_abs_delta",
+          "value": "0",
+          "unit": "amplitude"
+        }
+      ],
+      "details": [
+        "partition 512 canonical measurement records differ (first mismatch index 1)",
+        "partition 997 canonical measurement records differ (first mismatch index 1)",
+        "Observed, not a defect claim: block-start parameter application is the documented adapter contract"
+      ]
+    },
+    {
+      "id": "state",
+      "class": "authoring_state_and_migration",
+      "status": "pass",
+      "applicability": "Authoring state is versioned parameter state: reopening a project must restore the settings. It does not promise that processing resumes at the same sample; render equality after a restore belongs to the separate processing-checkpoint probe. Migration expectations are declared per historical fixture.",
+      "summary": "authoring round trip restored 4 parameters; 4 historical fixtures migrated",
+      "metrics": [
+        {
+          "name": "saved_state_sha256",
+          "value": "f545760bb6bb0cd04e023a363a22d1bf13bd06fdb6f8de194fd15e8b984f538a"
+        },
+        {
+          "name": "saved_state_bytes",
+          "value": "68"
+        },
+        {
+          "name": "restored_authoring_params",
+          "value": "4"
+        },
+        {
+          "name": "fixture_schema1_load",
+          "value": "ok"
+        },
+        {
+          "name": "fixture_schema1_param_1001",
+          "value": "512"
+        },
+        {
+          "name": "fixture_schema1_param_1002",
+          "value": "0"
+        },
+        {
+          "name": "fixture_schema1_param_1003",
+          "value": "0"
+        },
+        {
+          "name": "fixture_schema1_param_1004",
+          "value": "20"
+        },
+        {
+          "name": "fixture_schema1_capture_on",
+          "value": "false"
+        },
+        {
+          "name": "fixture_schema1_render_hash",
+          "value": "4e64f2fc8d77a2d096a5348c1da5a390f9191d46c72a419fc2e0360e276f5a74"
+        },
+        {
+          "name": "fixture_schema2_load",
+          "value": "ok"
+        },
+        {
+          "name": "fixture_schema2_param_1001",
+          "value": "256"
+        },
+        {
+          "name": "fixture_schema2_param_1002",
+          "value": "4800"
+        },
+        {
+          "name": "fixture_schema2_param_1003",
+          "value": "1"
+        },
+        {
+          "name": "fixture_schema2_param_1004",
+          "value": "40"
+        },
+        {
+          "name": "fixture_schema2_capture_on",
+          "value": "false"
+        },
+        {
+          "name": "fixture_schema2_render_hash",
+          "value": "4e64f2fc8d77a2d096a5348c1da5a390f9191d46c72a419fc2e0360e276f5a74"
+        },
+        {
+          "name": "fixture_schema3-capture-on_load",
+          "value": "ok"
+        },
+        {
+          "name": "fixture_schema3-capture-on_param_1001",
+          "value": "1024"
+        },
+        {
+          "name": "fixture_schema3-capture-on_param_1002",
+          "value": "9600"
+        },
+        {
+          "name": "fixture_schema3-capture-on_param_1003",
+          "value": "1"
+        },
+        {
+          "name": "fixture_schema3-capture-on_param_1004",
+          "value": "12.5"
+        },
+        {
+          "name": "fixture_schema3-capture-on_capture_on",
+          "value": "true"
+        },
+        {
+          "name": "fixture_schema3-capture-on_render_hash",
+          "value": "4e64f2fc8d77a2d096a5348c1da5a390f9191d46c72a419fc2e0360e276f5a74"
+        },
+        {
+          "name": "fixture_schema3-capture-off_load",
+          "value": "ok"
+        },
+        {
+          "name": "fixture_schema3-capture-off_param_1001",
+          "value": "2048"
+        },
+        {
+          "name": "fixture_schema3-capture-off_param_1002",
+          "value": "4800"
+        },
+        {
+          "name": "fixture_schema3-capture-off_param_1003",
+          "value": "0"
+        },
+        {
+          "name": "fixture_schema3-capture-off_param_1004",
+          "value": "20"
+        },
+        {
+          "name": "fixture_schema3-capture-off_capture_on",
+          "value": "false"
+        },
+        {
+          "name": "fixture_schema3-capture-off_render_hash",
+          "value": "4e64f2fc8d77a2d096a5348c1da5a390f9191d46c72a419fc2e0360e276f5a74"
+        }
+      ]
+    },
+    {
+      "id": "checkpoint",
+      "class": "processing_checkpoint_restore",
+      "status": "skip",
+      "applicability": "Optional capability: the specimen must first report supported() for the draft processing-checkpoint extension. A checkpoint resumes computation at an exact sample position, so the suffix after a restore must match an uninterrupted run. This is NOT the authoring-state contract: an authoring state that omits a delay line is not a defect unless the checkpoint capability is claimed.",
+      "summary": "specimen reports no processing-checkpoint support"
+    },
+    {
+      "id": "isolation",
+      "class": "instance_isolation",
+      "status": "pass",
+      "applicability": "Two instances in one host process with different parameter states, processed interleaved, must match their solo runs. Applicability: separate instances, not separate processes.",
+      "summary": "both interleaved instances match their solo runs",
+      "metrics": [
+        {
+          "name": "solo_a_hash",
+          "value": "4e64f2fc8d77a2d096a5348c1da5a390f9191d46c72a419fc2e0360e276f5a74"
+        },
+        {
+          "name": "interleaved_a_hash",
+          "value": "4e64f2fc8d77a2d096a5348c1da5a390f9191d46c72a419fc2e0360e276f5a74"
+        },
+        {
+          "name": "solo_b_hash",
+          "value": "4e64f2fc8d77a2d096a5348c1da5a390f9191d46c72a419fc2e0360e276f5a74"
+        },
+        {
+          "name": "interleaved_b_hash",
+          "value": "4e64f2fc8d77a2d096a5348c1da5a390f9191d46c72a419fc2e0360e276f5a74"
+        }
+      ]
+    },
+    {
+      "id": "reset",
+      "class": "reset_clean_state",
+      "status": "pass",
+      "applicability": "CLAP reset must clear processing state so reprocessing the same input matches a fresh instance. Authoring parameters are unchanged by reset. Tail state from before the reset is intentionally discarded.",
+      "summary": "post-reset reprocessing matches a fresh instance",
+      "metrics": [
+        {
+          "name": "first_pass_hash",
+          "value": "4e64f2fc8d77a2d096a5348c1da5a390f9191d46c72a419fc2e0360e276f5a74"
+        },
+        {
+          "name": "post_reset_hash",
+          "value": "4e64f2fc8d77a2d096a5348c1da5a390f9191d46c72a419fc2e0360e276f5a74"
+        },
+        {
+          "name": "fresh_hash",
+          "value": "4e64f2fc8d77a2d096a5348c1da5a390f9191d46c72a419fc2e0360e276f5a74"
+        }
+      ]
+    },
+    {
+      "id": "tail",
+      "class": "tail_boundedness",
+      "status": "pass",
+      "applicability": "Renders the program material then silence and measures the last frame above a documented threshold. Boundedness is an observation for this input and threshold, never a claim that the processor reached mathematical zero.",
+      "summary": "tail fell below -90.0 dBFS after 0 frames (declared hint 0)",
+      "metrics": [
+        {
+          "name": "program_frames",
+          "value": "16384"
+        },
+        {
+          "name": "silence_frames",
+          "value": "24000"
+        },
+        {
+          "name": "last_non_silent_frame",
+          "value": "16383"
+        },
+        {
+          "name": "measured_tail_frames",
+          "value": "0"
+        },
+        {
+          "name": "declared_tail_frames",
+          "value": "0"
+        },
+        {
+          "name": "nonfinite_samples",
+          "value": "0"
+        },
+        {
+          "name": "threshold",
+          "value": "1.58113883008e-05",
+          "unit": "amplitude"
+        },
+        {
+          "name": "threshold_db",
+          "value": "-90",
+          "unit": "dBFS"
+        }
+      ]
+    },
+    {
+      "id": "perturbation",
+      "class": "paired_input_response",
+      "status": "pass",
+      "applicability": "A single-sample input delta is applied to a copy of the input; the differing output window is measured. This is a response window for this input, not a proof of finite impulse-response support.",
+      "summary": "delta at frame 1000 affects 1 output frames starting at 1000",
+      "metrics": [
+        {
+          "name": "delta_frame",
+          "value": "1000"
+        },
+        {
+          "name": "delta",
+          "value": "0.25"
+        },
+        {
+          "name": "first_differing_frame",
+          "value": "1000"
+        },
+        {
+          "name": "last_differing_frame",
+          "value": "1000"
+        },
+        {
+          "name": "response_frames",
+          "value": "1"
+        },
+        {
+          "name": "rendered_frames",
+          "value": "40384"
+        },
+        {
+          "name": "declared_tail_frames",
+          "value": "0"
+        }
+      ]
+    },
+    {
+      "id": "capture_toggle",
+      "class": "capture_episode_semantics",
+      "status": "pass",
+      "applicability": "Enabling capture starts a fresh episode (queue cleared, dropped zeroed); disabling stops record production; re-enabling starts another episode. An episode switch requires quiescent processing: the host stops processing first. Live audio is unaffected. Main-thread calls only.",
+      "summary": "episode records 8 / 8, disabled produced 0",
+      "metrics": [
+        {
+          "name": "schema_version",
+          "value": "1"
+        },
+        {
+          "name": "capture_valid_first_episode",
+          "value": "true"
+        },
+        {
+          "name": "records_first_episode",
+          "value": "8"
+        },
+        {
+          "name": "records_while_disabled",
+          "value": "0"
+        },
+        {
+          "name": "records_second_episode",
+          "value": "8"
+        },
+        {
+          "name": "disable_succeeded",
+          "value": "true"
+        },
+        {
+          "name": "reenable_succeeded",
+          "value": "true"
+        },
+        {
+          "name": "input_hash",
+          "value": "57196f80ebeba53bbbc8c82a502217bbf51f6d8d9b24acdfec8f6963faeccc30"
+        },
+        {
+          "name": "output_hash",
+          "value": "57196f80ebeba53bbbc8c82a502217bbf51f6d8d9b24acdfec8f6963faeccc30"
+        }
+      ]
+    },
+    {
+      "id": "capture_overflow",
+      "class": "capture_queue_overflow",
+      "status": "pass",
+      "applicability": "Forces more canonical windows than the bounded queue holds without draining. Expect 4096 delivered records, a non-zero dropped counter, capture_valid false, and recovery on a new episode. Audio-domain validity is not touched.",
+      "summary": "4200 windows, 4096 delivered, 104 dropped, capture invalid as expected",
+      "metrics": [
+        {
+          "name": "windows_requested",
+          "value": "4200"
+        },
+        {
+          "name": "records_delivered",
+          "value": "4096"
+        },
+        {
+          "name": "dropped",
+          "value": "104"
+        },
+        {
+          "name": "capture_valid_after_overflow",
+          "value": "false"
+        },
+        {
+          "name": "dropped_after_new_episode",
+          "value": "0"
+        },
+        {
+          "name": "valid_after_new_episode",
+          "value": "true"
+        }
+      ]
+    },
+    {
+      "id": "gap",
+      "class": "audio_discontinuity_segments",
+      "status": "pass",
+      "applicability": "The host skips an absolute input range and advances the steady sample clock. The wire record has no segment id, so this probe checks observable consequences: no window straddles the lost range, post-gap windows align to the post-gap frame, and post-gap records are audio-invalid while capture validity is unaffected.",
+      "summary": "gap [4096,4608) recorded; 23 post-gap records start at 4608 and are audio-invalid",
+      "metrics": [
+        {
+          "name": "gap_start_frame",
+          "value": "4096"
+        },
+        {
+          "name": "gap_frames",
+          "value": "512"
+        },
+        {
+          "name": "records",
+          "value": "31"
+        },
+        {
+          "name": "pre_gap_records",
+          "value": "8"
+        },
+        {
+          "name": "post_gap_records",
+          "value": "23"
+        },
+        {
+          "name": "records_straddling_gap",
+          "value": "0"
+        },
+        {
+          "name": "first_post_gap_start",
+          "value": "4608"
+        }
+      ]
+    }
+  ],
+  "artifacts": [
+    {
+      "kind": "input",
+      "path": "input.wav",
+      "sha256": "4e10deff3e4804b44270f97f881525cdba330ba736aa7effd226ee004df4d5ff",
+      "bytes": 131116,
+      "frames": 16384,
+      "channels": 2,
+      "sample_rate": 48000
+    },
+    {
+      "kind": "output",
+      "path": "output.wav",
+      "sha256": "4e10deff3e4804b44270f97f881525cdba330ba736aa7effd226ee004df4d5ff",
+      "bytes": 131116,
+      "frames": 16384,
+      "channels": 2,
+      "sample_rate": 48000
+    },
+    {
+      "kind": "records",
+      "path": "records.csv",
+      "sha256": "c39478b6449cfd5c6b98704e3c78d7daac24d2adfa679fba5825c64f9aff633f",
+      "bytes": 2789,
+      "frames": 32,
+      "channels": 0,
+      "sample_rate": 48000
+    },
+    {
+      "kind": "output",
+      "path": "output.wav",
+      "sha256": "4e10deff3e4804b44270f97f881525cdba330ba736aa7effd226ee004df4d5ff",
+      "bytes": 131116,
+      "frames": 16384,
+      "channels": 2,
+      "sample_rate": 48000
+    },
+    {
+      "kind": "records",
+      "path": "records.csv",
+      "sha256": "c39478b6449cfd5c6b98704e3c78d7daac24d2adfa679fba5825c64f9aff633f",
+      "bytes": 2789,
+      "frames": 32,
+      "channels": 0,
+      "sample_rate": 48000
+    },
+    {
+      "kind": "partition_output",
+      "path": "partition_64.wav",
+      "sha256": "4e10deff3e4804b44270f97f881525cdba330ba736aa7effd226ee004df4d5ff",
+      "bytes": 131116,
+      "frames": 16384,
+      "channels": 2,
+      "sample_rate": 48000
+    },
+    {
+      "kind": "records",
+      "path": "partition_64_records.csv",
+      "sha256": "c39478b6449cfd5c6b98704e3c78d7daac24d2adfa679fba5825c64f9aff633f",
+      "bytes": 2789,
+      "frames": 32,
+      "channels": 0,
+      "sample_rate": 48000
+    },
+    {
+      "kind": "partition_output",
+      "path": "partition_128.wav",
+      "sha256": "4e10deff3e4804b44270f97f881525cdba330ba736aa7effd226ee004df4d5ff",
+      "bytes": 131116,
+      "frames": 16384,
+      "channels": 2,
+      "sample_rate": 48000
+    },
+    {
+      "kind": "records",
+      "path": "partition_128_records.csv",
+      "sha256": "c39478b6449cfd5c6b98704e3c78d7daac24d2adfa679fba5825c64f9aff633f",
+      "bytes": 2789,
+      "frames": 32,
+      "channels": 0,
+      "sample_rate": 48000
+    },
+    {
+      "kind": "partition_output",
+      "path": "partition_256.wav",
+      "sha256": "4e10deff3e4804b44270f97f881525cdba330ba736aa7effd226ee004df4d5ff",
+      "bytes": 131116,
+      "frames": 16384,
+      "channels": 2,
+      "sample_rate": 48000
+    },
+    {
+      "kind": "records",
+      "path": "partition_256_records.csv",
+      "sha256": "c39478b6449cfd5c6b98704e3c78d7daac24d2adfa679fba5825c64f9aff633f",
+      "bytes": 2789,
+      "frames": 32,
+      "channels": 0,
+      "sample_rate": 48000
+    },
+    {
+      "kind": "partition_output",
+      "path": "partition_512.wav",
+      "sha256": "4e10deff3e4804b44270f97f881525cdba330ba736aa7effd226ee004df4d5ff",
+      "bytes": 131116,
+      "frames": 16384,
+      "channels": 2,
+      "sample_rate": 48000
+    },
+    {
+      "kind": "records",
+      "path": "partition_512_records.csv",
+      "sha256": "c39478b6449cfd5c6b98704e3c78d7daac24d2adfa679fba5825c64f9aff633f",
+      "bytes": 2789,
+      "frames": 32,
+      "channels": 0,
+      "sample_rate": 48000
+    },
+    {
+      "kind": "partition_output",
+      "path": "partition_997.wav",
+      "sha256": "4e10deff3e4804b44270f97f881525cdba330ba736aa7effd226ee004df4d5ff",
+      "bytes": 131116,
+      "frames": 16384,
+      "channels": 2,
+      "sample_rate": 48000
+    },
+    {
+      "kind": "records",
+      "path": "partition_997_records.csv",
+      "sha256": "c39478b6449cfd5c6b98704e3c78d7daac24d2adfa679fba5825c64f9aff633f",
+      "bytes": 2789,
+      "frames": 32,
+      "channels": 0,
+      "sample_rate": 48000
+    },
+    {
+      "kind": "partition_output",
+      "path": "partition_irregular.wav",
+      "sha256": "4e10deff3e4804b44270f97f881525cdba330ba736aa7effd226ee004df4d5ff",
+      "bytes": 131116,
+      "frames": 16384,
+      "channels": 2,
+      "sample_rate": 48000
+    },
+    {
+      "kind": "records",
+      "path": "partition_irregular_records.csv",
+      "sha256": "c39478b6449cfd5c6b98704e3c78d7daac24d2adfa679fba5825c64f9aff633f",
+      "bytes": 2789,
+      "frames": 32,
+      "channels": 0,
+      "sample_rate": 48000
+    },
+    {
+      "kind": "tail_output",
+      "path": "tail.wav",
+      "sha256": "fed504f621dab9052038f02e5a376bf07f7c4672fe48d7a31bf59131757a4b67",
+      "bytes": 323116,
+      "frames": 40384,
+      "channels": 2,
+      "sample_rate": 48000
+    }
+  ],
+  "hashes": {
+    "environment_fingerprint": "763e1db3b98a50609a3413577b911285845b032ecebae50f8814dd2353a0bcb1",
+    "input_wav": "4e10deff3e4804b44270f97f881525cdba330ba736aa7effd226ee004df4d5ff",
+    "output_wav": "4e10deff3e4804b44270f97f881525cdba330ba736aa7effd226ee004df4d5ff",
+    "plugin": "ea7a4fe60a0b423902b10c4e0f47ef3c7861b6daa8fd3b3d29c5d7c36a871568",
+    "scenario": "cde970dbd8d69e9ba8a63ed702414c9bd3251f333edb97c8583548292d077510"
+  },
+  "exit": {
+    "code": 0,
+    "meaning": "all_probes_passed"
+  }
+}

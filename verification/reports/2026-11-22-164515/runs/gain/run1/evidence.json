@@ -1,0 +1,408 @@
+{
+  "schema": "carnival.verification.evidence/1",
+  "lab_revision": "m2.0",
+  "abi": "clap-1.2.10",
+  "scenario": {
+    "name": "reference-gain-census",
+    "description": "Stateless gain reference: exact per-sample multiply, expected byte-identical across partitions and fresh processes. Automation is control-rate at block boundaries.",
+    "sha256": "9b0e680dc5dda3b8fa7e5f144226c9886df2d2802657de09be790c957ed177c5",
+    "plugin_id": "com.carnival-science.reference.gain",
+    "class": "reference"
+  },
+  "specimen": {
+    "path": "C:\\Users\\saman\\dev\\pulse\\out\\reference\\gain.clap",
+    "sha256": "bb10fda2daccc515f7041f7546c7aff392563a90f93951fd70644380ee011999",
+    "descriptor_id": "com.carnival-science.reference.gain",
+    "name": "Reference Gain",
+    "vendor": "Carnival Science",
+    "version": "0.1.0",
+    "has_telemetry": false
+  },
+  "environment": {
+    "platform": "windows",
+    "arch": "x86_64",
+    "odin_build": "C:\\odin\\odin.exe version dev-2026-11-nightly:08539cd",
+    "host_revision": "m2.0",
+    "denormals": "preserved",
+    "denormal_probe": "tiny=1e-320 half=5e-321 tiny_nonzero=true half_nonzero=true",
+    "contraction": "separately_rounded",
+    "contraction_probe": "a*b+c=0",
+    "cpu": "AMD Ryzen 5 7600X 6-Core Processor",
+    "git_commit": "16d15f69801ac91a80eaf9a254d6dc127718efb0",
+    "note": "observed, not hermetic: no claim of universal determinism or real-time safety"
+  },
+  "probes": [
+    {
+      "id": "nonfinite",
+      "class": "non_finite_output",
+      "status": "pass",
+      "applicability": "Scans every rendered output sample for NaN/Inf. Applicable to every specimen; a failure is a real output defect for this input.",
+      "summary": "32768 output samples, all finite",
+      "metrics": [
+        {
+          "name": "nonfinite_samples",
+          "value": "0"
+        }
+      ]
+    },
+    {
+      "id": "repeatability",
+      "class": "fresh_instance_repeatability",
+      "status": "pass",
+      "applicability": "Two fresh instances in this process render the same scenario. Cross-process repeatability is checked by the runner repeating the run and comparing artifact hashes.",
+      "summary": "byte-identical output and records across two fresh instances",
+      "metrics": [
+        {
+          "name": "output_hash_1",
+          "value": "cd98af5ff2b00dd1b5cd19ca1dae0365fb76584d8c21fc28fe04d0301d8d4d57"
+        },
+        {
+          "name": "output_hash_2",
+          "value": "cd98af5ff2b00dd1b5cd19ca1dae0365fb76584d8c21fc28fe04d0301d8d4d57"
+        },
+        {
+          "name": "record_hash_1",
+          "value": "0ff016e7e44982c840cf955754ca5c0b07edf5dbd66f5e0b8edd0d6c42b5fb2a"
+        },
+        {
+          "name": "record_hash_2",
+          "value": "0ff016e7e44982c840cf955754ca5c0b07edf5dbd66f5e0b8edd0d6c42b5fb2a"
+        }
+      ]
+    },
+    {
+      "id": "partition",
+      "class": "static_partition_invariant",
+      "status": "pass",
+      "applicability": "Same absolute input and static parameters rendered under different block partitions. Expected class for stateless and per-sample-state processors is byte-exact invariance; a difference is a specimen failure, not a tolerance question.",
+      "summary": "byte-identical output and records across every declared partition",
+      "metrics": [
+        {
+          "name": "reference_partition",
+          "value": "64"
+        },
+        {
+          "name": "reference_output_hash",
+          "value": "cd98af5ff2b00dd1b5cd19ca1dae0365fb76584d8c21fc28fe04d0301d8d4d57"
+        },
+        {
+          "name": "reference_record_hash",
+          "value": "0ff016e7e44982c840cf955754ca5c0b07edf5dbd66f5e0b8edd0d6c42b5fb2a"
+        },
+        {
+          "name": "partitions",
+          "value": "6"
+        },
+        {
+          "name": "max_output_abs_delta",
+          "value": "0",
+          "unit": "amplitude"
+        }
+      ]
+    },
+    {
+      "id": "automation",
+      "class": "automation_partition_sensitive_control_rate",
+      "status": "pass",
+      "applicability": "Sample-timestamped parameter events are delivered inside CLAP blocks. The adapter under test applies a block's events at block start (documented control-rate semantics), so automation results are expected to be partition-sensitive. This probe labels the observed class; it does not require sample-exact automation.",
+      "summary": "automation changes across 2 audio and 0 record partition comparisons (observed control-rate class)",
+      "metrics": [
+        {
+          "name": "static_output_hash",
+          "value": "cd98af5ff2b00dd1b5cd19ca1dae0365fb76584d8c21fc28fe04d0301d8d4d57"
+        },
+        {
+          "name": "automation_output_hash_0",
+          "value": "5704ac8fbc63ef17baf8364529114e194e52e61ca266cfac4d172d45693158b9"
+        },
+        {
+          "name": "automation_changes_output",
+          "value": "true"
+        },
+        {
+          "name": "automation_output_hash_512",
+          "value": "83deecf5e3a83d4ecfc3dc0d48cd4e4841bd7062b8b85d04b26c253ac66bb174"
+        },
+        {
+          "name": "automation_output_hash_997",
+          "value": "48bb88700167a82112019bb466475f18724125c445e818ce5b939202a021d709"
+        },
+        {
+          "name": "automation_partitions",
+          "value": "3"
+        },
+        {
+          "name": "partition_sensitive_pairs",
+          "value": "2"
+        },
+        {
+          "name": "record_partition_sensitive_pairs",
+          "value": "0"
+        },
+        {
+          "name": "max_output_abs_delta",
+          "value": "0.375",
+          "unit": "amplitude"
+        }
+      ],
+      "details": [
+        "partition 512 differs at frame 512 (max abs delta 0.375)",
+        "partition 997 differs at frame 960 (max abs delta 0.375)",
+        "Observed, not a defect claim: block-start parameter application is the documented adapter contract"
+      ]
+    },
+    {
+      "id": "state",
+      "class": "authoring_state_and_migration",
+      "status": "pass",
+      "applicability": "Authoring state is versioned parameter state. Processing state is not authoring state; processors may additionally serialize a schema-4 processing blob. Migration expectations are declared per historical fixture.",
+      "summary": "authoring round trip restored 1 parameters; continuous state restore checked",
+      "metrics": [
+        {
+          "name": "saved_state_sha256",
+          "value": "2dc81d287631fb50b9565a15a786840e85d77ace38198cf82a5d9714e075395e"
+        },
+        {
+          "name": "saved_state_bytes",
+          "value": "28"
+        },
+        {
+          "name": "restored_authoring_params",
+          "value": "1"
+        },
+        {
+          "name": "processing_state_sha256",
+          "value": "2dc81d287631fb50b9565a15a786840e85d77ace38198cf82a5d9714e075395e"
+        },
+        {
+          "name": "continuous_suffix_hash",
+          "value": "eeec47419f8b9bdc3241b83b8d0e1c2aaef4959e60a6df9bd85230604f426370"
+        },
+        {
+          "name": "restored_suffix_hash",
+          "value": "eeec47419f8b9bdc3241b83b8d0e1c2aaef4959e60a6df9bd85230604f426370"
+        }
+      ]
+    },
+    {
+      "id": "isolation",
+      "class": "instance_isolation",
+      "status": "pass",
+      "applicability": "Two instances in one host process with different parameter states, processed interleaved, must match their solo runs. Applicability: separate instances, not separate processes.",
+      "summary": "both interleaved instances match their solo runs",
+      "metrics": [
+        {
+          "name": "solo_a_hash",
+          "value": "cd98af5ff2b00dd1b5cd19ca1dae0365fb76584d8c21fc28fe04d0301d8d4d57"
+        },
+        {
+          "name": "interleaved_a_hash",
+          "value": "cd98af5ff2b00dd1b5cd19ca1dae0365fb76584d8c21fc28fe04d0301d8d4d57"
+        },
+        {
+          "name": "solo_b_hash",
+          "value": "e2348dae45f1c125f21de975ae766a0c78c3734ee4ff5c14b7f74bc96c04ce1f"
+        },
+        {
+          "name": "interleaved_b_hash",
+          "value": "e2348dae45f1c125f21de975ae766a0c78c3734ee4ff5c14b7f74bc96c04ce1f"
+        }
+      ]
+    },
+    {
+      "id": "reset",
+      "class": "reset_clean_state",
+      "status": "pass",
+      "applicability": "CLAP reset must clear processing state so reprocessing the same input matches a fresh instance. Authoring parameters are unchanged by reset. Tail state from before the reset is intentionally discarded.",
+      "summary": "post-reset reprocessing matches a fresh instance",
+      "metrics": [
+        {
+          "name": "first_pass_hash",
+          "value": "cd98af5ff2b00dd1b5cd19ca1dae0365fb76584d8c21fc28fe04d0301d8d4d57"
+        },
+        {
+          "name": "post_reset_hash",
+          "value": "cd98af5ff2b00dd1b5cd19ca1dae0365fb76584d8c21fc28fe04d0301d8d4d57"
+        },
+        {
+          "name": "fresh_hash",
+          "value": "cd98af5ff2b00dd1b5cd19ca1dae0365fb76584d8c21fc28fe04d0301d8d4d57"
+        }
+      ]
+    },
+    {
+      "id": "tail",
+      "class": "tail_boundedness",
+      "status": "pass",
+      "applicability": "Renders the program material then silence and measures the last frame above a documented threshold. Boundedness is an observation for this input and threshold, never a claim that the processor reached mathematical zero.",
+      "summary": "tail fell below -90.0 dBFS after 0 frames (declared hint 0)",
+      "metrics": [
+        {
+          "name": "program_frames",
+          "value": "16384"
+        },
+        {
+          "name": "silence_frames",
+          "value": "12000"
+        },
+        {
+          "name": "last_non_silent_frame",
+          "value": "16383"
+        },
+        {
+          "name": "measured_tail_frames",
+          "value": "0"
+        },
+        {
+          "name": "declared_tail_frames",
+          "value": "0"
+        },
+        {
+          "name": "nonfinite_samples",
+          "value": "0"
+        },
+        {
+          "name": "threshold",
+          "value": "1.58113883008e-05",
+          "unit": "amplitude"
+        },
+        {
+          "name": "threshold_db",
+          "value": "-90",
+          "unit": "dBFS"
+        }
+      ]
+    },
+    {
+      "id": "perturbation",
+      "class": "paired_input_response",
+      "status": "pass",
+      "applicability": "A single-sample input delta is applied to a copy of the input; the differing output window is measured. This is a response window for this input, not a proof of finite impulse-response support.",
+      "summary": "delta at frame 1000 affects 1 output frames starting at 1000",
+      "metrics": [
+        {
+          "name": "delta_frame",
+          "value": "1000"
+        },
+        {
+          "name": "delta",
+          "value": "0.25"
+        },
+        {
+          "name": "first_differing_frame",
+          "value": "1000"
+        },
+        {
+          "name": "last_differing_frame",
+          "value": "1000"
+        },
+        {
+          "name": "response_frames",
+          "value": "1"
+        },
+        {
+          "name": "rendered_frames",
+          "value": "28384"
+        },
+        {
+          "name": "declared_tail_frames",
+          "value": "0"
+        }
+      ]
+    }
+  ],
+  "artifacts": [
+    {
+      "kind": "input",
+      "path": "input.wav",
+      "sha256": "4e10deff3e4804b44270f97f881525cdba330ba736aa7effd226ee004df4d5ff",
+      "bytes": 131116,
+      "frames": 16384,
+      "channels": 2,
+      "sample_rate": 48000
+    },
+    {
+      "kind": "output",
+      "path": "output.wav",
+      "sha256": "d73fa5a9214422a16d03ffaa9610dc4ff3e2d902cfb3bc3805c187600685fca3",
+      "bytes": 131116,
+      "frames": 16384,
+      "channels": 2,
+      "sample_rate": 48000
+    },
+    {
+      "kind": "partition_output",
+      "path": "partition_64.wav",
+      "sha256": "d73fa5a9214422a16d03ffaa9610dc4ff3e2d902cfb3bc3805c187600685fca3",
+      "bytes": 131116,
+      "frames": 16384,
+      "channels": 2,
+      "sample_rate": 48000
+    },
+    {
+      "kind": "partition_output",
+      "path": "partition_128.wav",
+      "sha256": "d73fa5a9214422a16d03ffaa9610dc4ff3e2d902cfb3bc3805c187600685fca3",
+      "bytes": 131116,
+      "frames": 16384,
+      "channels": 2,
+      "sample_rate": 48000
+    },
+    {
+      "kind": "partition_output",
+      "path": "partition_256.wav",
+      "sha256": "d73fa5a9214422a16d03ffaa9610dc4ff3e2d902cfb3bc3805c187600685fca3",
+      "bytes": 131116,
+      "frames": 16384,
+      "channels": 2,
+      "sample_rate": 48000
+    },
+    {
+      "kind": "partition_output",
+      "path": "partition_512.wav",
+      "sha256": "d73fa5a9214422a16d03ffaa9610dc4ff3e2d902cfb3bc3805c187600685fca3",
+      "bytes": 131116,
+      "frames": 16384,
+      "channels": 2,
+      "sample_rate": 48000
+    },
+    {
+      "kind": "partition_output",
+      "path": "partition_997.wav",
+      "sha256": "d73fa5a9214422a16d03ffaa9610dc4ff3e2d902cfb3bc3805c187600685fca3",
+      "bytes": 131116,
+      "frames": 16384,
+      "channels": 2,
+      "sample_rate": 48000
+    },
+    {
+      "kind": "partition_output",
+      "path": "partition_irregular.wav",
+      "sha256": "d73fa5a9214422a16d03ffaa9610dc4ff3e2d902cfb3bc3805c187600685fca3",
+      "bytes": 131116,
+      "frames": 16384,
+      "channels": 2,
+      "sample_rate": 48000
+    },
+    {
+      "kind": "tail_output",
+      "path": "tail.wav",
+      "sha256": "7959cd4d40ab091971f38533acda82466567f42324fe975b893ba6574a8cd373",
+      "bytes": 227116,
+      "frames": 28384,
+      "channels": 2,
+      "sample_rate": 48000
+    }
+  ],
+  "hashes": {
+    "environment_fingerprint": "763e1db3b98a50609a3413577b911285845b032ecebae50f8814dd2353a0bcb1",
+    "input_wav": "4e10deff3e4804b44270f97f881525cdba330ba736aa7effd226ee004df4d5ff",
+    "output_wav": "d73fa5a9214422a16d03ffaa9610dc4ff3e2d902cfb3bc3805c187600685fca3",
+    "plugin": "bb10fda2daccc515f7041f7546c7aff392563a90f93951fd70644380ee011999",
+    "scenario": "9b0e680dc5dda3b8fa7e5f144226c9886df2d2802657de09be790c957ed177c5"
+  },
+  "exit": {
+    "code": 0,
+    "meaning": "all_probes_passed"
+  }
+}
