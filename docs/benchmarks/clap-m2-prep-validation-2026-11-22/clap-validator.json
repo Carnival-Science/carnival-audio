@@ -1,0 +1,745 @@
+{
+  "results": [
+    {
+      "test": {
+        "plugin-library": {
+          "test": "query-nonexistent-factory",
+          "path": "C:\\Users\\saman\\dev\\pulse\\out\\pulse.clap"
+        }
+      },
+      "status": {
+        "code": "success",
+        "details": null
+      },
+      "duration": {
+        "secs": 0,
+        "nanos": 436900
+      }
+    },
+    {
+      "test": {
+        "plugin-library": {
+          "test": "create-id-with-trailing-garbage",
+          "path": "C:\\Users\\saman\\dev\\pulse\\out\\pulse.clap"
+        }
+      },
+      "status": {
+        "code": "success",
+        "details": null
+      },
+      "duration": {
+        "secs": 0,
+        "nanos": 532100
+      }
+    },
+    {
+      "test": {
+        "plugin-library": {
+          "test": "scan-rtld-now",
+          "path": "C:\\Users\\saman\\dev\\pulse\\out\\pulse.clap"
+        }
+      },
+      "status": {
+        "code": "skipped",
+        "details": "This test is only relevant to Unix-like platforms"
+      },
+      "duration": {
+        "secs": 0,
+        "nanos": 1900
+      }
+    },
+    {
+      "test": {
+        "plugin-library": {
+          "test": "scan-time",
+          "path": "C:\\Users\\saman\\dev\\pulse\\out\\pulse.clap"
+        }
+      },
+      "status": {
+        "code": "success",
+        "details": "The plugin can be scanned in 0 milliseconds."
+      },
+      "duration": {
+        "secs": 0,
+        "nanos": 390800
+      }
+    },
+    {
+      "test": {
+        "plugin-library": {
+          "test": "preset-discovery-crawl",
+          "path": "C:\\Users\\saman\\dev\\pulse\\out\\pulse.clap"
+        }
+      },
+      "status": {
+        "code": "skipped",
+        "details": "The plugin does not implement the 'clap.preset-discovery-factory/2' factory."
+      },
+      "duration": {
+        "secs": 0,
+        "nanos": 364700
+      }
+    },
+    {
+      "test": {
+        "plugin-library": {
+          "test": "preset-discovery-descriptor-consistency",
+          "path": "C:\\Users\\saman\\dev\\pulse\\out\\pulse.clap"
+        }
+      },
+      "status": {
+        "code": "skipped",
+        "details": "The plugin does not implement the 'clap.preset-discovery-factory/2' factory."
+      },
+      "duration": {
+        "secs": 0,
+        "nanos": 399800
+      }
+    },
+    {
+      "test": {
+        "plugin-library": {
+          "test": "preset-discovery-load",
+          "path": "C:\\Users\\saman\\dev\\pulse\\out\\pulse.clap"
+        }
+      },
+      "status": {
+        "code": "skipped",
+        "details": "The plugin does not implement the 'clap.preset-discovery-factory/2' factory."
+      },
+      "duration": {
+        "secs": 0,
+        "nanos": 352900
+      }
+    },
+    {
+      "test": {
+        "plugin-instance": {
+          "test": "descriptor-consistency",
+          "path": "C:\\Users\\saman\\dev\\pulse\\out\\pulse.clap",
+          "plugin_id": "com.carnival-science.pulse.meter"
+        }
+      },
+      "status": {
+        "code": "success",
+        "details": null
+      },
+      "duration": {
+        "secs": 0,
+        "nanos": 371000
+      }
+    },
+    {
+      "test": {
+        "plugin-instance": {
+          "test": "features-categories",
+          "path": "C:\\Users\\saman\\dev\\pulse\\out\\pulse.clap",
+          "plugin_id": "com.carnival-science.pulse.meter"
+        }
+      },
+      "status": {
+        "code": "success",
+        "details": null
+      },
+      "duration": {
+        "secs": 0,
+        "nanos": 385400
+      }
+    },
+    {
+      "test": {
+        "plugin-instance": {
+          "test": "features-duplicates",
+          "path": "C:\\Users\\saman\\dev\\pulse\\out\\pulse.clap",
+          "plugin_id": "com.carnival-science.pulse.meter"
+        }
+      },
+      "status": {
+        "code": "success",
+        "details": null
+      },
+      "duration": {
+        "secs": 0,
+        "nanos": 381700
+      }
+    },
+    {
+      "test": {
+        "plugin-instance": {
+          "test": "process-audio-basic-out-of-place",
+          "path": "C:\\Users\\saman\\dev\\pulse\\out\\pulse.clap",
+          "plugin_id": "com.carnival-science.pulse.meter"
+        }
+      },
+      "status": {
+        "code": "success",
+        "details": null
+      },
+      "duration": {
+        "secs": 0,
+        "nanos": 1504900
+      }
+    },
+    {
+      "test": {
+        "plugin-instance": {
+          "test": "process-audio-basic-in-place",
+          "path": "C:\\Users\\saman\\dev\\pulse\\out\\pulse.clap",
+          "plugin_id": "com.carnival-science.pulse.meter"
+        }
+      },
+      "status": {
+        "code": "success",
+        "details": null
+      },
+      "duration": {
+        "secs": 0,
+        "nanos": 1202400
+      }
+    },
+    {
+      "test": {
+        "plugin-instance": {
+          "test": "process-audio-double-out-of-place",
+          "path": "C:\\Users\\saman\\dev\\pulse\\out\\pulse.clap",
+          "plugin_id": "com.carnival-science.pulse.meter"
+        }
+      },
+      "status": {
+        "code": "skipped",
+        "details": "The plugin does not support 64-bit floating point audio."
+      },
+      "duration": {
+        "secs": 0,
+        "nanos": 379000
+      }
+    },
+    {
+      "test": {
+        "plugin-instance": {
+          "test": "process-audio-double-in-place",
+          "path": "C:\\Users\\saman\\dev\\pulse\\out\\pulse.clap",
+          "plugin_id": "com.carnival-science.pulse.meter"
+        }
+      },
+      "status": {
+        "code": "skipped",
+        "details": "The plugin does not support 64-bit floating point audio."
+      },
+      "duration": {
+        "secs": 0,
+        "nanos": 406100
+      }
+    },
+    {
+      "test": {
+        "plugin-instance": {
+          "test": "process-audio-denormals",
+          "path": "C:\\Users\\saman\\dev\\pulse\\out\\pulse.clap",
+          "plugin_id": "com.carnival-science.pulse.meter"
+        }
+      },
+      "status": {
+        "code": "success",
+        "details": null
+      },
+      "duration": {
+        "secs": 0,
+        "nanos": 11358900
+      }
+    },
+    {
+      "test": {
+        "plugin-instance": {
+          "test": "process-sleep-constant-mask",
+          "path": "C:\\Users\\saman\\dev\\pulse\\out\\pulse.clap",
+          "plugin_id": "com.carnival-science.pulse.meter"
+        }
+      },
+      "status": {
+        "code": "success",
+        "details": "The plugin never set the constant flag on any output"
+      },
+      "duration": {
+        "secs": 0,
+        "nanos": 5226400
+      }
+    },
+    {
+      "test": {
+        "plugin-instance": {
+          "test": "process-sleep-process-status",
+          "path": "C:\\Users\\saman\\dev\\pulse\\out\\pulse.clap",
+          "plugin_id": "com.carnival-science.pulse.meter"
+        }
+      },
+      "status": {
+        "code": "success",
+        "details": "The plugin never went to sleep during the test."
+      },
+      "duration": {
+        "secs": 0,
+        "nanos": 7151800
+      }
+    },
+    {
+      "test": {
+        "plugin-instance": {
+          "test": "process-note-out-of-place-basic",
+          "path": "C:\\Users\\saman\\dev\\pulse\\out\\pulse.clap",
+          "plugin_id": "com.carnival-science.pulse.meter"
+        }
+      },
+      "status": {
+        "code": "skipped",
+        "details": "The plugin does not implement the 'note-ports' extension."
+      },
+      "duration": {
+        "secs": 0,
+        "nanos": 388500
+      }
+    },
+    {
+      "test": {
+        "plugin-instance": {
+          "test": "process-note-inconsistent",
+          "path": "C:\\Users\\saman\\dev\\pulse\\out\\pulse.clap",
+          "plugin_id": "com.carnival-science.pulse.meter"
+        }
+      },
+      "status": {
+        "code": "skipped",
+        "details": "The plugin does not implement the 'note-ports' extension."
+      },
+      "duration": {
+        "secs": 0,
+        "nanos": 387000
+      }
+    },
+    {
+      "test": {
+        "plugin-instance": {
+          "test": "process-note-wildcard",
+          "path": "C:\\Users\\saman\\dev\\pulse\\out\\pulse.clap",
+          "plugin_id": "com.carnival-science.pulse.meter"
+        }
+      },
+      "status": {
+        "code": "skipped",
+        "details": "The plugin does not implement the 'note-ports' extension."
+      },
+      "duration": {
+        "secs": 0,
+        "nanos": 422600
+      }
+    },
+    {
+      "test": {
+        "plugin-instance": {
+          "test": "process-varying-sample-rates",
+          "path": "C:\\Users\\saman\\dev\\pulse\\out\\pulse.clap",
+          "plugin_id": "com.carnival-science.pulse.meter"
+        }
+      },
+      "status": {
+        "code": "success",
+        "details": null
+      },
+      "duration": {
+        "secs": 0,
+        "nanos": 10790500
+      }
+    },
+    {
+      "test": {
+        "plugin-instance": {
+          "test": "process-varying-block-sizes",
+          "path": "C:\\Users\\saman\\dev\\pulse\\out\\pulse.clap",
+          "plugin_id": "com.carnival-science.pulse.meter"
+        }
+      },
+      "status": {
+        "code": "success",
+        "details": null
+      },
+      "duration": {
+        "secs": 0,
+        "nanos": 14609500
+      }
+    },
+    {
+      "test": {
+        "plugin-instance": {
+          "test": "process-random-block-sizes",
+          "path": "C:\\Users\\saman\\dev\\pulse\\out\\pulse.clap",
+          "plugin_id": "com.carnival-science.pulse.meter"
+        }
+      },
+      "status": {
+        "code": "success",
+        "details": null
+      },
+      "duration": {
+        "secs": 0,
+        "nanos": 4877900
+      }
+    },
+    {
+      "test": {
+        "plugin-instance": {
+          "test": "process-reset-reactivate",
+          "path": "C:\\Users\\saman\\dev\\pulse\\out\\pulse.clap",
+          "plugin_id": "com.carnival-science.pulse.meter"
+        }
+      },
+      "status": {
+        "code": "success",
+        "details": null
+      },
+      "duration": {
+        "secs": 0,
+        "nanos": 1165500
+      }
+    },
+    {
+      "test": {
+        "plugin-instance": {
+          "test": "layout-audio-ports-activation",
+          "path": "C:\\Users\\saman\\dev\\pulse\\out\\pulse.clap",
+          "plugin_id": "com.carnival-science.pulse.meter"
+        }
+      },
+      "status": {
+        "code": "skipped",
+        "details": "The plugin does not implement the 'audio-ports-activation' extension."
+      },
+      "duration": {
+        "secs": 0,
+        "nanos": 378000
+      }
+    },
+    {
+      "test": {
+        "plugin-instance": {
+          "test": "layout-audio-ports-config",
+          "path": "C:\\Users\\saman\\dev\\pulse\\out\\pulse.clap",
+          "plugin_id": "com.carnival-science.pulse.meter"
+        }
+      },
+      "status": {
+        "code": "skipped",
+        "details": "The plugin does not implement the 'audio-ports-config' extension."
+      },
+      "duration": {
+        "secs": 0,
+        "nanos": 344800
+      }
+    },
+    {
+      "test": {
+        "plugin-instance": {
+          "test": "layout-configurable-audio-ports",
+          "path": "C:\\Users\\saman\\dev\\pulse\\out\\pulse.clap",
+          "plugin_id": "com.carnival-science.pulse.meter"
+        }
+      },
+      "status": {
+        "code": "skipped",
+        "details": "The plugin does not implement the 'configurable-audio-ports' extension."
+      },
+      "duration": {
+        "secs": 0,
+        "nanos": 348200
+      }
+    },
+    {
+      "test": {
+        "plugin-instance": {
+          "test": "param-set-events",
+          "path": "C:\\Users\\saman\\dev\\pulse\\out\\pulse.clap",
+          "plugin_id": "com.carnival-science.pulse.meter"
+        }
+      },
+      "status": {
+        "code": "success",
+        "details": null
+      },
+      "duration": {
+        "secs": 0,
+        "nanos": 814300
+      }
+    },
+    {
+      "test": {
+        "plugin-instance": {
+          "test": "param-set-no-cookies",
+          "path": "C:\\Users\\saman\\dev\\pulse\\out\\pulse.clap",
+          "plugin_id": "com.carnival-science.pulse.meter"
+        }
+      },
+      "status": {
+        "code": "success",
+        "details": null
+      },
+      "duration": {
+        "secs": 0,
+        "nanos": 778400
+      }
+    },
+    {
+      "test": {
+        "plugin-instance": {
+          "test": "param-set-wrong-namespace",
+          "path": "C:\\Users\\saman\\dev\\pulse\\out\\pulse.clap",
+          "plugin_id": "com.carnival-science.pulse.meter"
+        }
+      },
+      "status": {
+        "code": "success",
+        "details": null
+      },
+      "duration": {
+        "secs": 0,
+        "nanos": 832000
+      }
+    },
+    {
+      "test": {
+        "plugin-instance": {
+          "test": "param-fuzz-basic",
+          "path": "C:\\Users\\saman\\dev\\pulse\\out\\pulse.clap",
+          "plugin_id": "com.carnival-science.pulse.meter"
+        }
+      },
+      "status": {
+        "code": "success",
+        "details": null
+      },
+      "duration": {
+        "secs": 0,
+        "nanos": 35310800
+      }
+    },
+    {
+      "test": {
+        "plugin-instance": {
+          "test": "param-fuzz-bounds",
+          "path": "C:\\Users\\saman\\dev\\pulse\\out\\pulse.clap",
+          "plugin_id": "com.carnival-science.pulse.meter"
+        }
+      },
+      "status": {
+        "code": "success",
+        "details": null
+      },
+      "duration": {
+        "secs": 0,
+        "nanos": 37805500
+      }
+    },
+    {
+      "test": {
+        "plugin-instance": {
+          "test": "param-fuzz-sample-accurate",
+          "path": "C:\\Users\\saman\\dev\\pulse\\out\\pulse.clap",
+          "plugin_id": "com.carnival-science.pulse.meter"
+        }
+      },
+      "status": {
+        "code": "success",
+        "details": null
+      },
+      "duration": {
+        "secs": 0,
+        "nanos": 2537000
+      }
+    },
+    {
+      "test": {
+        "plugin-instance": {
+          "test": "param-fuzz-modulation",
+          "path": "C:\\Users\\saman\\dev\\pulse\\out\\pulse.clap",
+          "plugin_id": "com.carnival-science.pulse.meter"
+        }
+      },
+      "status": {
+        "code": "success",
+        "details": null
+      },
+      "duration": {
+        "secs": 0,
+        "nanos": 806000
+      }
+    },
+    {
+      "test": {
+        "plugin-instance": {
+          "test": "param-conversions",
+          "path": "C:\\Users\\saman\\dev\\pulse\\out\\pulse.clap",
+          "plugin_id": "com.carnival-science.pulse.meter"
+        }
+      },
+      "status": {
+        "code": "success",
+        "details": null
+      },
+      "duration": {
+        "secs": 0,
+        "nanos": 791400
+      }
+    },
+    {
+      "test": {
+        "plugin-instance": {
+          "test": "param-default-values",
+          "path": "C:\\Users\\saman\\dev\\pulse\\out\\pulse.clap",
+          "plugin_id": "com.carnival-science.pulse.meter"
+        }
+      },
+      "status": {
+        "code": "success",
+        "details": null
+      },
+      "duration": {
+        "secs": 0,
+        "nanos": 351800
+      }
+    },
+    {
+      "test": {
+        "plugin-instance": {
+          "test": "state-invalid-empty",
+          "path": "C:\\Users\\saman\\dev\\pulse\\out\\pulse.clap",
+          "plugin_id": "com.carnival-science.pulse.meter"
+        }
+      },
+      "status": {
+        "code": "success",
+        "details": null
+      },
+      "duration": {
+        "secs": 0,
+        "nanos": 392800
+      }
+    },
+    {
+      "test": {
+        "plugin-instance": {
+          "test": "state-invalid-random",
+          "path": "C:\\Users\\saman\\dev\\pulse\\out\\pulse.clap",
+          "plugin_id": "com.carnival-science.pulse.meter"
+        }
+      },
+      "status": {
+        "code": "success",
+        "details": null
+      },
+      "duration": {
+        "secs": 0,
+        "nanos": 864600
+      }
+    },
+    {
+      "test": {
+        "plugin-instance": {
+          "test": "state-reproducibility-basic",
+          "path": "C:\\Users\\saman\\dev\\pulse\\out\\pulse.clap",
+          "plugin_id": "com.carnival-science.pulse.meter"
+        }
+      },
+      "status": {
+        "code": "success",
+        "details": null
+      },
+      "duration": {
+        "secs": 0,
+        "nanos": 538700
+      }
+    },
+    {
+      "test": {
+        "plugin-instance": {
+          "test": "state-reproducibility-binary",
+          "path": "C:\\Users\\saman\\dev\\pulse\\out\\pulse.clap",
+          "plugin_id": "com.carnival-science.pulse.meter"
+        }
+      },
+      "status": {
+        "code": "success",
+        "details": null
+      },
+      "duration": {
+        "secs": 0,
+        "nanos": 454700
+      }
+    },
+    {
+      "test": {
+        "plugin-instance": {
+          "test": "state-reproducibility-buffered",
+          "path": "C:\\Users\\saman\\dev\\pulse\\out\\pulse.clap",
+          "plugin_id": "com.carnival-science.pulse.meter"
+        }
+      },
+      "status": {
+        "code": "success",
+        "details": null
+      },
+      "duration": {
+        "secs": 0,
+        "nanos": 400800
+      }
+    },
+    {
+      "test": {
+        "plugin-instance": {
+          "test": "transport-null",
+          "path": "C:\\Users\\saman\\dev\\pulse\\out\\pulse.clap",
+          "plugin_id": "com.carnival-science.pulse.meter"
+        }
+      },
+      "status": {
+        "code": "success",
+        "details": null
+      },
+      "duration": {
+        "secs": 0,
+        "nanos": 829200
+      }
+    },
+    {
+      "test": {
+        "plugin-instance": {
+          "test": "transport-fuzz",
+          "path": "C:\\Users\\saman\\dev\\pulse\\out\\pulse.clap",
+          "plugin_id": "com.carnival-science.pulse.meter"
+        }
+      },
+      "status": {
+        "code": "success",
+        "details": null
+      },
+      "duration": {
+        "secs": 0,
+        "nanos": 3014400
+      }
+    },
+    {
+      "test": {
+        "plugin-instance": {
+          "test": "transport-fuzz-sample-accurate",
+          "path": "C:\\Users\\saman\\dev\\pulse\\out\\pulse.clap",
+          "plugin_id": "com.carnival-science.pulse.meter"
+        }
+      },
+      "status": {
+        "code": "success",
+        "details": null
+      },
+      "duration": {
+        "secs": 0,
+        "nanos": 3001100
+      }
+    }
+  ]
+}

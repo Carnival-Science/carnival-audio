@@ -1,0 +1,1 @@
+Pulse Meter                                 105.9x realtime    50.4 µs/block  (20000 blocks)

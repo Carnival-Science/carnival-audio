@@ -1,0 +1,232 @@
+{
+   "clap-version" : "1.2.10",
+   "file" : "C:\\Users\\saman\\dev\\pulse\\out\\pulse.clap",
+   "plugin_count" : 1,
+   "plugins" : [
+      {
+         "descriptor" : {
+            "description" : "Headless stereo sample peak, RMS and peak-hold meter",
+            "features" : [ "audio-effect", "analyzer", "stereo" ],
+            "id" : "com.carnival-science.pulse.meter",
+            "name" : "Pulse Meter",
+            "vendor" : "Carnival Science",
+            "version" : "0.1.0"
+         },
+         "extensions" : {
+            "clap.ambisonic.draft/3" : {
+               "implemented" : false
+            },
+            "clap.ambisonic/3" : {
+               "implemented" : false
+            },
+            "clap.audio-ports" : {
+               "implemented" : true,
+               "input-port-count" : 1,
+               "input-ports" : [
+                  {
+                     "channel-count" : 2,
+                     "flags" : {
+                        "fields" : [ "CLAP_AUDIO_PORT_IS_MAIN" ],
+                        "value" : 1
+                     },
+                     "id" : 1,
+                     "in-place-pair" : 2,
+                     "name" : "Input",
+                     "port-type" : "stereo"
+                  }
+               ],
+               "output-port-count" : 1,
+               "output-ports" : [
+                  {
+                     "channel-count" : 2,
+                     "flags" : {
+                        "fields" : [ "CLAP_AUDIO_PORT_IS_MAIN" ],
+                        "value" : 1
+                     },
+                     "id" : 2,
+                     "in-place-pair" : 1,
+                     "name" : "Output",
+                     "port-type" : "stereo"
+                  }
+               ]
+            },
+            "clap.audio-ports-activation/2" : {
+               "implemented" : false
+            },
+            "clap.audio-ports-activation/draft-2" : {
+               "implemented" : false
+            },
+            "clap.audio-ports-config" : {
+               "implemented" : false
+            },
+            "clap.audio-ports-config-info/1" : {
+               "implemented" : false
+            },
+            "clap.audio-ports-config-info/draft-0" : {
+               "implemented" : false
+            },
+            "clap.configurable-audio-ports.draft1" : {
+               "implemented" : false
+            },
+            "clap.configurable-audio-ports/1" : {
+               "implemented" : false
+            },
+            "clap.context-menu.draft/0" : {
+               "implemented" : false
+            },
+            "clap.context-menu/1" : {
+               "implemented" : false
+            },
+            "clap.event-registry" : {
+               "implemented" : false
+            },
+            "clap.extensible-audio-ports/1" : {
+               "implemented" : false
+            },
+            "clap.gui" : {
+               "implemented" : false
+            },
+            "clap.latency" : {
+               "implemented" : true,
+               "latency" : 0
+            },
+            "clap.log" : {
+               "implemented" : false
+            },
+            "clap.note-name" : {
+               "implemented" : false
+            },
+            "clap.note-ports" : {
+               "implmeented" : false
+            },
+            "clap.param-indication.draft/4" : {
+               "implemented" : false
+            },
+            "clap.param-indication/4" : {
+               "implemented" : false
+            },
+            "clap.params" : {
+               "implemented" : true,
+               "param-count" : 4,
+               "param-info" : [
+                  {
+                     "flags" : [ "stepped", "auto" ],
+                     "id" : "0x3e9",
+                     "module" : "Analysis",
+                     "name" : "Window Frames",
+                     "values" : {
+                        "current" : 1024.0,
+                        "default" : 1024.0,
+                        "max" : 8192.0,
+                        "min" : 128.0
+                     }
+                  },
+                  {
+                     "flags" : [ "stepped", "auto" ],
+                     "id" : "0x3ea",
+                     "module" : "Hold",
+                     "name" : "Hold Frames",
+                     "values" : {
+                        "current" : 4800.0,
+                        "default" : 4800.0,
+                        "max" : 96000.0,
+                        "min" : 0.0
+                     }
+                  },
+                  {
+                     "flags" : [ "stepped", "auto" ],
+                     "id" : "0x3eb",
+                     "module" : "Hold",
+                     "name" : "Hold Decay",
+                     "values" : {
+                        "current" : 1.0,
+                        "default" : 1.0,
+                        "max" : 1.0,
+                        "min" : 0.0
+                     }
+                  },
+                  {
+                     "flags" : [ "auto" ],
+                     "id" : "0x3ec",
+                     "module" : "Hold",
+                     "name" : "Hold Decay Rate",
+                     "values" : {
+                        "current" : 20.0,
+                        "default" : 20.0,
+                        "max" : 120.0,
+                        "min" : 0.0
+                     }
+                  }
+               ]
+            },
+            "clap.posix-fd-support" : {
+               "implemented" : false
+            },
+            "clap.preset-load.draft/2" : {
+               "implemented" : false
+            },
+            "clap.preset-load/2" : {
+               "implemented" : false
+            },
+            "clap.remote-controls.draft/2" : {
+               "implemented" : false
+            },
+            "clap.remote-controls/2" : {
+               "implemented" : false
+            },
+            "clap.render" : {
+               "implemented" : false
+            },
+            "clap.resource-directory/1" : {
+               "implemented" : false
+            },
+            "clap.state" : {
+               "bytes-written" : 68,
+               "implemented" : true
+            },
+            "clap.state-context/2" : {
+               "implemented" : false
+            },
+            "clap.surround.draft/4" : {
+               "implemented" : false
+            },
+            "clap.surround/4" : {
+               "implemented" : false
+            },
+            "clap.tail" : {
+               "implemented" : true,
+               "tail" : 0
+            },
+            "clap.thread-check" : {
+               "implemented" : false
+            },
+            "clap.thread-pool" : {
+               "implemented" : false
+            },
+            "clap.timer-support" : {
+               "implemented" : false
+            },
+            "clap.track-info.draft/1" : {
+               "implemented" : false
+            },
+            "clap.track-info/1" : {
+               "implemented" : false
+            },
+            "clap.transport-control/2" : {
+               "implemented" : false
+            },
+            "clap.triggers/1" : {
+               "implemented" : false
+            },
+            "clap.tuning/2" : {
+               "implemented" : false
+            },
+            "clap.voice-info" : {
+               "implemented" : false
+            }
+         },
+         "plugin-index" : 0
+      }
+   ]
+}
+

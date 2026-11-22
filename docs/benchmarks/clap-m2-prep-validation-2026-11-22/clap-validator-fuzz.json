@@ -1,0 +1,11 @@
+[
+  {
+    "status": {
+      "type": "failed",
+      "details": "The sample written to output port 0, channel 0, and sample index 0 is subnormal (-0.000000000000000000000000000000000000003377157)."
+    },
+    "library": "C:\\Users\\saman\\dev\\pulse\\out\\pulse.clap",
+    "plugin-id": "com.carnival-science.pulse.meter",
+    "seed": 7394663036550585518
+  }
+]

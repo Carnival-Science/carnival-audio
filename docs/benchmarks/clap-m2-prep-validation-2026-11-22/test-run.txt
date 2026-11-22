@@ -1,0 +1,27 @@
+odin: C:\odin\odin.exe
+check-boundary: ok (12 core files, 0 verification files, 7 third_party files, 2 adapters files, 3 products files scanned)
+abi: compiling C layout probe
+abi_probe.c
+abi: compiling C calling-convention probe
+cc_probe.c
+   Creating library C:\Users\saman\dev\pulse\out\abi\clap_cc_probe.lib and object C:\Users\saman\dev\pulse\out\abi\clap_cc_probe.exp
+abi: probes built in C:\Users\saman\dev\pulse\out\abi
+PULSE_CLAP_ABI_PROBE=C:\Users\saman\dev\pulse\out\abi\abi_probe.txt
+PULSE_CLAP_CC_PROBE=C:\Users\saman\dev\pulse\out\abi\clap_cc_probe.dll
+== test core/stream ==
+== test core/dsp ==
+== test core/transport ==
+ring stress: 100000 blocks, 1886 gaps, 69091331 frames
+snapshot stress: 1000000 publications, 4 readers, 924337 valid reads, 88111 invalid (retry-bound) reads, max attempts 64
+== test tests ==
+bounded-memory peak: 366260 bytes over 19 allocations (ceiling 2097152)
+FFT partition invariance: max amplitude abs diff 0
+partition invariance: peak exact; max RMS abs diff 0, max correlation abs diff 0
+== test third_party/clap/abi ==
+CLAP ABI layout: 36 struct sizes and 153 field offsets agree with C
+CLAP C probe: entry/factory/plugin/host/events/audio-ports vtables agree in both directions
+== test adapters/clap ==
+== test products/pulse ==
+process timing (256 frames, 48kHz): p50 51.80 us, p95 69.80 us, p99 78.70 us, max 192.70 us; pending records 1250, high-water 1250, dropped 0
+cold create+activate (max 512 frames): 95.90 us
+test: all packages passed

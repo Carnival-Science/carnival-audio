@@ -1,0 +1,15 @@
+✓ Plugin loaded
+✓ Got plugin factory
+✓ Found 1 plugin(s)
+
+── Pulse Meter ──
+  ✓ create_plugin()
+  ✓ init()
+  ✓ activate(48000 Hz, 256 samples)
+  ✓ start_processing()
+  ✓ process() x100 blocks
+  ✓ stop_processing()
+  ✓ deactivate()
+  ✓ destroy()
+
+All 1 plugin(s) validated successfully.

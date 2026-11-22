@@ -1,0 +1,44 @@
+success  query-nonexistent-factory
+success  create-id-with-trailing-garbage
+skipped  scan-rtld-now
+success  scan-time
+skipped  preset-discovery-crawl
+skipped  preset-discovery-descriptor-consistency
+skipped  preset-discovery-load
+success  
+success  
+success  
+success  
+success  
+skipped  
+skipped  
+success  
+success  
+success  
+skipped  
+skipped  
+skipped  
+success  
+success  
+success  
+success  
+skipped  
+skipped  
+skipped  
+success  
+success  
+success  
+success  
+success  
+success  
+success  
+success  
+success  
+success  
+success  
+success  
+success  
+success  
+success  
+success  
+success  
