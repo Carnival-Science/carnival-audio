@@ -14,7 +14,7 @@
 // Strictness is deliberate: malformed headers, inconsistent block alignment /
 // byte rate, data before fmt, duplicate fmt/data chunks, unsupported encodings
 // and truncated chunks are explicit errors rather than guesses.
-package audio
+package stream
 
 import "core:math"
 import "core:mem"

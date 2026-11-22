@@ -1,5 +1,5 @@
-# Compile-check every Pulse package. Milestone 0 has no executable entry point;
-# this gate proves the public API and tests type-check with vet enabled.
+# Compile-check every package. Milestone 0 has no executable entry point; this
+# gate proves the public API and tests type-check with vet enabled.
 #
 # Floating-point contraction: the Odin toolchain used here (dev-2026-11-nightly)
 # exposes no -fma/-no-fma flag, so there is no build switch to set. DSP code
@@ -18,7 +18,7 @@ $packages = Get-PulsePackages
 foreach ($package in $packages) {
     $path = Join-Path $repoRoot $package
     Write-Host "check $package"
-    & $Odin check $path "-collection:pulse=$repoRoot" -vet -warnings-as-errors -no-entry-point
+    & $Odin check $path "-collection:carnival=$repoRoot" -vet -warnings-as-errors -no-entry-point
     if ($LASTEXITCODE -ne 0) {
         exit $LASTEXITCODE
     }

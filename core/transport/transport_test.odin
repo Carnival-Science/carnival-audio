@@ -3,7 +3,7 @@ package transport
 import "core:testing"
 import "core:thread"
 
-import audio "pulse:core/audio"
+import "carnival:core/stream"
 
 @(test)
 test_ring_order_wrap_and_depth :: proc(t: ^testing.T) {
@@ -16,7 +16,7 @@ test_ring_order_wrap_and_depth :: proc(t: ^testing.T) {
 		for index in 0 ..< 4 {
 			block_samples[index] = f32(block_index * 10 + index)
 		}
-		block := audio.Audio_Block{
+		block := stream.Audio_Block{
 			start_frame = i64(1000 + block_index * 2),
 			frames = 2,
 			channels = 2,
@@ -44,7 +44,7 @@ test_ring_order_wrap_and_depth :: proc(t: ^testing.T) {
 		for index in 0 ..< 4 {
 			block_samples[index] = f32(block_index * 10 + index)
 		}
-		block := audio.Audio_Block{
+		block := stream.Audio_Block{
 			start_frame = i64(1000 + block_index * 2),
 			frames = 2,
 			channels = 2,
@@ -58,10 +58,10 @@ test_ring_order_wrap_and_depth :: proc(t: ^testing.T) {
 
 	// The sample clock is explicit: a mismatched start frame is rejected and is
 	// not reported as an overrun.
-	wrong_clock := audio.Audio_Block{start_frame = 9999, frames = 2, channels = 2, interleaved = block_samples[:]}
+	wrong_clock := stream.Audio_Block{start_frame = 9999, frames = 2, channels = 2, interleaved = block_samples[:]}
 	testing.expect(t, !audio_ring_write(&ring, wrong_clock), "clock mismatch rejected")
 	testing.expect(t, !audio_ring_overrun_seen(&ring), "clock mismatch is not an overrun")
-	block := audio.Audio_Block{start_frame = 1016, frames = 2, channels = 2, interleaved = block_samples[:]}
+	block := stream.Audio_Block{start_frame = 1016, frames = 2, channels = 2, interleaved = block_samples[:]}
 	testing.expect(t, audio_ring_write(&ring, block), "correct clock accepted")
 	testing.expect(t, !audio_ring_overrun_seen(&ring), "no overrun")
 	testing.expect_value(t, audio_ring_dropped_blocks(&ring), u64(0))
@@ -73,7 +73,7 @@ test_ring_overrun_is_sticky_until_reset :: proc(t: ^testing.T) {
 	testing.expect(t, audio_ring_init(&ring, 2, 1, 1), "init")
 	defer audio_ring_destroy(&ring)
 	value := [1]f32{1}
-	block := audio.Audio_Block{frames = 1, channels = 1, interleaved = value[:]}
+	block := stream.Audio_Block{frames = 1, channels = 1, interleaved = value[:]}
 	testing.expect(t, audio_ring_write(&ring, block), "write 1")
 	block.start_frame = 1
 	testing.expect(t, audio_ring_write(&ring, block), "write 2")
@@ -148,7 +148,7 @@ test_ring_spsc_threaded :: proc(t: ^testing.T) {
 		for index in 0 ..< len(block_samples) {
 			block_samples[index] = f32(block_index)
 		}
-		block := audio.Audio_Block{
+		block := stream.Audio_Block{
 			start_frame = i64(block_index * u64(block_frames)),
 			frames = block_frames,
 			channels = channels,

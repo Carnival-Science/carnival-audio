@@ -1,9 +1,9 @@
-package analysis
+package dsp
 
 import "core:math"
 import "core:testing"
 
-import audio "pulse:core/audio"
+import "carnival:core/stream"
 
 // Naive O(n^2) DFT used only as a test oracle.
 dft_naive :: proc(input: []Complex32) -> []Complex32 {
@@ -136,7 +136,7 @@ test_real_fft_sine_amplitude_and_leakage :: proc(t: ^testing.T) {
 	frequency := f64(bin * sample_rate) / f64(n)
 	input := make([]f32, n)
 	defer delete(input)
-	testing.expect_value(t, audio.generate_sine(input, sample_rate, 1, frequency, 1.0), audio.Audio_Error.None)
+	testing.expect_value(t, stream.generate_sine(input, sample_rate, 1, frequency, 1.0), stream.Audio_Error.None)
 
 	kinds := [?]Window_Kind{.Rectangular, .Hann, .Hamming, .Blackman_Harris}
 	for kind in kinds {

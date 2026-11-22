@@ -19,7 +19,7 @@ package transport
 import "core:mem"
 import "core:sync"
 
-import audio "pulse:core/audio"
+import "carnival:core/stream"
 
 Audio_Ring :: struct {
 	samples:          []f32,
@@ -46,7 +46,7 @@ audio_ring_init :: proc(
 	epoch: u64 = 0,
 	allocator := context.allocator,
 ) -> bool {
-	if capacity_blocks < 1 || block_frames < 1 || channels < 1 || channels > audio.MAX_CHANNELS || first_frame < 0 {
+	if capacity_blocks < 1 || block_frames < 1 || channels < 1 || channels > stream.MAX_CHANNELS || first_frame < 0 {
 		return false
 	}
 	count := capacity_blocks * block_frames * channels
@@ -84,8 +84,8 @@ audio_ring_block_samples :: proc(ring: ^Audio_Ring) -> int {
 // must equal the ring's next sample-clock position. Partial blocks and clock
 // mismatches are rejected (the producer decides how to pad, end or reset a
 // stream). Returns false on overrun.
-audio_ring_write :: proc(ring: ^Audio_Ring, block: audio.Audio_Block) -> bool {
-	if !audio.audio_block_valid(block) {
+audio_ring_write :: proc(ring: ^Audio_Ring, block: stream.Audio_Block) -> bool {
+	if !stream.audio_block_valid(block) {
 		return false
 	}
 	if block.frames != ring.block_frames || block.channels != ring.channels {

@@ -4,9 +4,9 @@ package tests
 import "core:mem"
 import "core:testing"
 
-import analysis "pulse:core/analysis"
-import audio "pulse:core/audio"
-import transport "pulse:core/transport"
+import "carnival:core/dsp"
+import "carnival:core/stream"
+import "carnival:core/transport"
 
 // Counting_Allocator measures peak bytes requested from a backing allocator.
 // It is intentionally simple: the goal is a ceiling for setup allocations, not
@@ -73,11 +73,11 @@ MAX_WINDOWS :: 16
 
 RMS_Collector :: struct {
 	count:  int,
-	values: [MAX_WINDOWS][analysis.MAX_CHANNELS]f32,
+	values: [MAX_WINDOWS][dsp.MAX_CHANNELS]f32,
 	valid:  [MAX_WINDOWS]bool,
 }
 
-rms_collector_callback :: proc(user: rawptr, record: analysis.RMS_Record) {
+rms_collector_callback :: proc(user: rawptr, record: dsp.RMS_Record) {
 	collector := cast(^RMS_Collector)user
 	if collector.count < MAX_WINDOWS {
 		for channel in 0 ..< record.channels {
@@ -94,7 +94,7 @@ Correlation_Collector :: struct {
 	valid:  [MAX_WINDOWS]bool,
 }
 
-correlation_collector_callback :: proc(user: rawptr, record: analysis.Correlation_Record) {
+correlation_collector_callback :: proc(user: rawptr, record: dsp.Correlation_Record) {
 	collector := cast(^Correlation_Collector)user
 	if collector.count < MAX_WINDOWS {
 		collector.values[collector.count] = record.value
@@ -104,8 +104,8 @@ correlation_collector_callback :: proc(user: rawptr, record: analysis.Correlatio
 }
 
 Partition_Result :: struct {
-	peak:          analysis.Sample_Peak,
-	peak_channels: [analysis.MAX_CHANNELS]analysis.Sample_Peak,
+	peak:          dsp.Sample_Peak,
+	peak_channels: [dsp.MAX_CHANNELS]dsp.Sample_Peak,
 	rms:           RMS_Collector,
 	correlation:   Correlation_Collector,
 }
@@ -114,26 +114,26 @@ Partition_Result :: struct {
 // arbitrary contiguous blocks, as a real transport or replay source would.
 run_partitions :: proc(samples: []f32, frames, channels, partition: int) -> Partition_Result {
 	result: Partition_Result
-	peak: analysis.Peak_Accumulator
-	_ = analysis.peak_accumulator_init(&peak, channels)
-	rms_window: analysis.RMS_Window
-	_ = analysis.rms_window_init(&rms_window, 1024, channels)
-	correlation_window: analysis.Correlation_Window
-	_ = analysis.correlation_window_init(&correlation_window, 1024)
+	peak: dsp.Peak_Accumulator
+	_ = dsp.peak_accumulator_init(&peak, channels)
+	rms_window: dsp.RMS_Window
+	_ = dsp.rms_window_init(&rms_window, 1024, channels)
+	correlation_window: dsp.Correlation_Window
+	_ = dsp.correlation_window_init(&correlation_window, 1024)
 
 	offset := 0
 	for offset < frames {
 		count := min(partition, frames - offset)
-		block := audio.Audio_Block{
+		block := stream.Audio_Block{
 			start_frame = i64(offset),
 			frames = count,
 			channels = channels,
 			interleaved = samples[offset * channels : (offset + count) * channels],
 		}
-		_ = analysis.peak_accumulator_process(&peak, block)
-		_ = analysis.rms_window_process(&rms_window, block, rms_collector_callback, &result.rms)
+		_ = dsp.peak_accumulator_process(&peak, block)
+		_ = dsp.rms_window_process(&rms_window, block, rms_collector_callback, &result.rms)
 		if channels == 2 {
-			_ = analysis.correlation_window_process(&correlation_window, block, correlation_collector_callback, &result.correlation)
+			_ = dsp.correlation_window_process(&correlation_window, block, correlation_collector_callback, &result.correlation)
 		}
 		offset += count
 	}
@@ -154,12 +154,12 @@ FFT_Partition_Result :: struct {
 // amplitude spectrum of each complete window.
 run_fft_partitions :: proc(t: ^testing.T, samples: []f32, frames, channels, partition: int) -> FFT_Partition_Result {
 	result: FFT_Partition_Result
-	plan: analysis.Real_FFT_Plan
-	testing.expect(t, analysis.real_fft_plan_init(&plan, 1024, .Hann) == .None, "plan")
-	defer analysis.real_fft_plan_destroy(&plan)
+	plan: dsp.Real_FFT_Plan
+	testing.expect(t, dsp.real_fft_plan_init(&plan, 1024, .Hann) == .None, "plan")
+	defer dsp.real_fft_plan_destroy(&plan)
 	window_samples := make([]f32, 1024)
 	defer delete(window_samples)
-	spectrum := make([]analysis.Complex32, 513)
+	spectrum := make([]dsp.Complex32, 513)
 	defer delete(spectrum)
 	filled := 0
 	offset := 0
@@ -169,10 +169,10 @@ run_fft_partitions :: proc(t: ^testing.T, samples: []f32, frames, channels, part
 			window_samples[filled] = samples[(offset + frame) * channels]
 			filled += 1
 			if filled == 1024 {
-				testing.expect(t, analysis.real_fft_forward(&plan, window_samples, spectrum), "forward")
+				testing.expect(t, dsp.real_fft_forward(&plan, window_samples, spectrum), "forward")
 				if result.count < 8 {
 					for bin in 0 ..< 513 {
-						result.magnitudes[result.count][bin] = analysis.real_fft_amplitude(&plan, spectrum, bin)
+						result.magnitudes[result.count][bin] = dsp.real_fft_amplitude(&plan, spectrum, bin)
 					}
 					result.count += 1
 				}
@@ -195,8 +195,8 @@ pipeline_snapshot :: proc(result: Partition_Result, generation: u64 = 1) -> tran
 		peak = {result.peak_channels[0].magnitude, result.peak_channels[1].magnitude},
 		peak_frame = {result.peak_channels[0].frame, result.peak_channels[1].frame},
 		peak_db = {
-			analysis.peak_amplitude_to_dbfs(result.peak_channels[0].magnitude),
-			analysis.peak_amplitude_to_dbfs(result.peak_channels[1].magnitude),
+			dsp.peak_amplitude_to_dbfs(result.peak_channels[0].magnitude),
+			dsp.peak_amplitude_to_dbfs(result.peak_channels[1].magnitude),
 		},
 		correlation = 0,
 		correlation_valid = false,
@@ -208,9 +208,9 @@ pipeline_snapshot :: proc(result: Partition_Result, generation: u64 = 1) -> tran
 		}
 		for channel in 0 ..< 2 {
 			snapshot.rms[channel] = result.rms.values[last][channel]
-			snapshot.rms_db[channel] = analysis.rms_to_dbfs(result.rms.values[last][channel])
+			snapshot.rms_db[channel] = dsp.rms_to_dbfs(result.rms.values[last][channel])
 			snapshot.hold[channel] = result.peak_channels[channel].magnitude
-			snapshot.hold_db[channel] = analysis.peak_amplitude_to_dbfs(result.peak_channels[channel].magnitude)
+			snapshot.hold_db[channel] = dsp.peak_amplitude_to_dbfs(result.peak_channels[channel].magnitude)
 		}
 	}
 	if result.correlation.count > 0 {

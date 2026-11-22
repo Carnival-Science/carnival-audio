@@ -8,7 +8,7 @@
 // The white-noise PRNG is xorshift64* (Marsaglia / Vigna), implemented here so
 // fixtures never depend on core:math/rand's unspecified sequence or on the
 // process-global random state.
-package audio
+package stream
 
 import "core:math"
 

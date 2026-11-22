@@ -1,4 +1,4 @@
-// Package audio defines Pulse's source-independent audio stream contract.
+// Package stream defines the source-independent audio stream contract.
 //
 // Everything in this package is plain Odin. It must not import Alicorn, SDL,
 // miniaudio, CLAP or any platform audio/graphics library (see AGENTS.md).
@@ -23,7 +23,7 @@
 // On-disk and device formats are described by `Sample_Format`. Analysis always
 // runs on interleaved f32 frames. The decode conventions are documented in
 // `docs/determinism.md` and implemented in wav.odin.
-package audio
+package stream
 
 // Maximum channel count accepted by the core. Fixed-size accumulators use this
 // as their static bound, which keeps every analysis type allocation-free.

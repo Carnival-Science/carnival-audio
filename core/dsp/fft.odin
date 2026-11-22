@@ -16,7 +16,7 @@
 //	               0.35875 - 0.48829 cos(2*pi*k/N)
 //	                       + 0.14128 cos(4*pi*k/N)
 //	                       - 0.01168 cos(6*pi*k/N)
-package analysis
+package dsp
 
 import "core:math"
 import "core:mem"

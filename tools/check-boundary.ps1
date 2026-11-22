@@ -1,35 +1,65 @@
-# Boundary gate for core/.
+# Structural boundary gate for the carnival-audio monorepo.
 #
-# AGENTS.md makes the source-independent boundary non-negotiable: core/ may use
-# Odin core: packages only, never Alicorn, SDL, miniaudio, CLAP, or a platform
-# audio backend. This is intentionally a simple textual gate, not a compiler.
+# AGENTS.md makes two boundaries non-negotiable:
+#
+#   core/          may import Odin core: packages and sibling core packages only.
+#                  It never imports Alicorn, SDL, miniaudio, a platform audio
+#                  backend, CLAP, adapters/, products/ or verification/.
+#
+#   verification/  may import core record formats but never core/dsp (the
+#                  implementation it must verify independently), adapters/,
+#                  products/, Alicorn or CLAP. Its numerical references must be
+#                  independent; the import boundary makes that structural.
+#
+# This is intentionally a simple textual gate, not a compiler.
 $ErrorActionPreference = 'Stop'
 
 $repoRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..')).Path
-$coreRoot = Join-Path $repoRoot 'core'
-if (-not (Test-Path -LiteralPath $coreRoot -PathType Container)) {
-    throw "core/ not found at '$coreRoot'."
+
+$scopes = @(
+    @{
+        Name    = 'core'
+        Root    = Join-Path $repoRoot 'core'
+        Pattern = '(?im)^\s*(?:foreign\s+)?import\s+(?:[A-Za-z_][A-Za-z0-9_]*\s+)?"(?:alicorn[^"]*|vendor:(?:sdl3|miniaudio|wasapi|alsa|coreaudio)[^"]*|[^"]*clap[^"]*|[^"]*verification[^"]*|[^"]*(?:adapters|products)/[^"]*)"'
+        Reason  = 'core/ may import only Odin core: packages and sibling core packages.'
+    },
+    @{
+        Name    = 'verification'
+        Root    = Join-Path $repoRoot 'verification'
+        Pattern = '(?im)^\s*(?:foreign\s+)?import\s+(?:[A-Za-z_][A-Za-z0-9_]*\s+)?"(?:[^"]*core/dsp[^"]*|alicorn[^"]*|vendor:(?:sdl3|miniaudio|wasapi|alsa|coreaudio)[^"]*|[^"]*clap[^"]*|[^"]*(?:adapters|products)/[^"]*)"'
+        Reason  = 'verification/ must not import core/dsp, adapters/, products/, Alicorn or CLAP; use independent numerical references.'
+    }
+)
+
+$counts = @()
+$failed = $false
+foreach ($scope in $scopes) {
+    if (-not (Test-Path -LiteralPath $scope.Root -PathType Container)) {
+        throw "$($scope.Name)/ not found at '$($scope.Root)'."
+    }
+    $files = @(Get-ChildItem -LiteralPath $scope.Root -Recurse -File -Filter '*.odin')
+    $found = @()
+    foreach ($file in $files) {
+        $matches = Select-String -LiteralPath $file.FullName -Pattern $scope.Pattern
+        foreach ($match in $matches) {
+            $relative = $file.FullName.Substring($repoRoot.Length + 1)
+            $found += "${relative}:$($match.LineNumber): $($match.Line.Trim())"
+        }
+    }
+    if ($found.Count -gt 0) {
+        Write-Host "Boundary violation: $($scope.Name)/ imports a forbidden package." -ForegroundColor Red
+        foreach ($violation in $found) {
+            Write-Host "  $violation"
+        }
+        Write-Host $scope.Reason -ForegroundColor Red
+        $failed = $true
+    }
+    $counts += "$($files.Count) $($scope.Name) files"
 }
 
-$files = Get-ChildItem -LiteralPath $coreRoot -Recurse -File -Filter '*.odin'
-$pattern = '(?im)^\s*(?:foreign\s+)?import\s+(?:[A-Za-z_][A-Za-z0-9_]*\s+)?"(?:alicorn[^"]*|vendor:(?:sdl3|miniaudio|wasapi|alsa|coreaudio)[^"]*|[^"]*clap[^"]*)"'
-$violations = @()
-foreach ($file in $files) {
-    $matches = Select-String -LiteralPath $file.FullName -Pattern $pattern
-    foreach ($match in $matches) {
-        $relative = $file.FullName.Substring($repoRoot.Length + 1)
-        $violations += "${relative}:$($match.LineNumber): $($match.Line.Trim())"
-    }
-}
-
-if ($violations.Count -gt 0) {
-    Write-Host 'Boundary violation: core/ imports a forbidden package.' -ForegroundColor Red
-    foreach ($violation in $violations) {
-        Write-Host "  $violation"
-    }
-    Write-Host 'core/ may import only Odin core: packages and Pulse core packages.' -ForegroundColor Red
+if ($failed) {
     exit 1
 }
 
-Write-Host "check-boundary: ok ($($files.Count) core files scanned)"
+Write-Host "check-boundary: ok ($($counts -join ', ') scanned)"
 exit 0

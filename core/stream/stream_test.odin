@@ -1,4 +1,4 @@
-package audio
+package stream
 
 import "core:testing"
 

@@ -1,4 +1,4 @@
-# Shared helpers for Pulse's PowerShell tools.
+# Shared helpers for the carnival-audio PowerShell tools.
 $ErrorActionPreference = 'Stop'
 
 function Resolve-PulseOdin {
@@ -51,8 +51,8 @@ function Get-PulseRepoRoot {
 
 function Get-PulsePackages {
     return @(
-        'core/audio',
-        'core/analysis',
+        'core/stream',
+        'core/dsp',
         'core/transport',
         'tests'
     )

@@ -22,7 +22,7 @@ checked mechanically.
 
 ## Transcendental functions
 
-Per-sample paths in `core/analysis` contain only loads, multiply, add and
+Per-sample paths in `core/dsp` contain only loads, multiply, add and
 compare. `sin`/`cos` are used only when building an FFT plan (twiddle and
 window tables). `log10` is used only by reporting helpers that convert an
 already-computed RMS to dBFS, never inside a sample loop.

@@ -4,6 +4,11 @@ Status: completed research input to Milestone 0. Sources are listed at the end;
 claims marked *(audit)* come from the completed audit record and were not
 re-verified locally.
 
+> Repository consolidation: the Milestone 0 core and the prepared verification
+> laboratory now live in one `carnival-audio` monorepo with strict module
+> boundaries; ADR-1's independence is preserved structurally rather than by
+> separate repositories.
+
 ## Question
 
 What is the smallest **source-independent** Odin analysis core that can carry a

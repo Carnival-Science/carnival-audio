@@ -1,4 +1,4 @@
-# Third-party notices for Pulse
+# Third-party notices for carnival-audio
 
 - **CLAP** (planned, Milestone 1): MIT — https://github.com/free-audio/clap
   Headers/bindings pinned at the official repository; ABI 1.2.x.

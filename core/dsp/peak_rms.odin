@@ -8,13 +8,13 @@
 //
 // dBFS is referenced to a full-scale square wave (RMS 1.0), so a full-scale
 // sine reads -3.010299956639812 dBFS. See docs/determinism.md.
-package analysis
+package dsp
 
 import "core:math"
 
-import audio "pulse:core/audio"
+import "carnival:core/stream"
 
-MAX_CHANNELS :: audio.MAX_CHANNELS
+MAX_CHANNELS :: stream.MAX_CHANNELS
 
 // DBFS_FLOOR is reported instead of -inf for digital silence.
 DBFS_FLOOR :: f32(-144.0)
@@ -54,8 +54,8 @@ peak_accumulator_reset :: proc(acc: ^Peak_Accumulator) {
 	acc^ = Peak_Accumulator{channels = channels}
 }
 
-peak_accumulator_process :: proc(acc: ^Peak_Accumulator, block: audio.Audio_Block) -> bool {
-	if !audio.audio_block_valid(block) || block.channels != acc.channels {
+peak_accumulator_process :: proc(acc: ^Peak_Accumulator, block: stream.Audio_Block) -> bool {
+	if !stream.audio_block_valid(block) || block.channels != acc.channels {
 		return false
 	}
 	for frame in 0 ..< block.frames {
@@ -85,7 +85,7 @@ peak_accumulator_process :: proc(acc: ^Peak_Accumulator, block: audio.Audio_Bloc
 }
 
 // sample_peak computes the overall sample peak of one block.
-sample_peak :: proc(block: audio.Audio_Block) -> Sample_Peak {
+sample_peak :: proc(block: stream.Audio_Block) -> Sample_Peak {
 	acc: Peak_Accumulator
 	if !peak_accumulator_init(&acc, block.channels) {
 		return {}
@@ -167,11 +167,11 @@ RMS_Window_Callback :: #type proc(user_data: rawptr, record: RMS_Record)
 // invalid configuration, leaving the accumulator untouched for that block.
 rms_window_process :: proc(
 	window: ^RMS_Window,
-	block: audio.Audio_Block,
+	block: stream.Audio_Block,
 	callback: RMS_Window_Callback,
 	user_data: rawptr = nil,
 ) -> bool {
-	if !audio.audio_block_valid(block) || block.channels != window.channels || window.window_frames < 1 {
+	if !stream.audio_block_valid(block) || block.channels != window.channels || window.window_frames < 1 {
 		return false
 	}
 	if block.start_frame != window.next_frame {
@@ -283,8 +283,8 @@ peak_hold_reset :: proc(hold: ^Peak_Hold) {
 	}
 }
 
-peak_hold_process :: proc(hold: ^Peak_Hold, block: audio.Audio_Block) -> bool {
-	if !audio.audio_block_valid(block) || block.channels != hold.channels {
+peak_hold_process :: proc(hold: ^Peak_Hold, block: stream.Audio_Block) -> bool {
+	if !stream.audio_block_valid(block) || block.channels != hold.channels {
 		return false
 	}
 	for frame in 0 ..< block.frames {

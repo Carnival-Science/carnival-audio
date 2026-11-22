@@ -8,9 +8,9 @@ import "core:math"
 import "core:mem"
 import "core:testing"
 
-import analysis "pulse:core/analysis"
-import audio "pulse:core/audio"
-import transport "pulse:core/transport"
+import "carnival:core/dsp"
+import "carnival:core/stream"
+import "carnival:core/transport"
 
 @(test)
 test_golden_sine_rms_and_hann_bin :: proc(t: ^testing.T) {
@@ -18,14 +18,14 @@ test_golden_sine_rms_and_hann_bin :: proc(t: ^testing.T) {
 	FRAMES :: 4800
 	samples := make([]f32, FRAMES * 2)
 	defer delete(samples)
-	testing.expect_value(t, audio.generate_sine(samples, SAMPLE_RATE, 2, 1000, 0.5), audio.Audio_Error.None)
-	rms := analysis.rms_over(samples)
+	testing.expect_value(t, stream.generate_sine(samples, SAMPLE_RATE, 2, 1000, 0.5), stream.Audio_Error.None)
+	rms := dsp.rms_over(samples)
 	// Closed form: amplitude 0.5 / sqrt(2). Literal, not computed by the code
 	// under test.
 	testing.expectf(t, math.abs(rms - 0.3535533905932738) < 1e-6, "sine RMS: %v", rms)
 	expected_db := f32(-9.030899869919436)
-	testing.expectf(t, math.abs(analysis.rms_to_dbfs(rms) - expected_db) < 1e-4,
-		"sine dBFS: %v", analysis.rms_to_dbfs(rms))
+	testing.expectf(t, math.abs(dsp.rms_to_dbfs(rms) - expected_db) < 1e-4,
+		"sine dBFS: %v", dsp.rms_to_dbfs(rms))
 
 	// Hann-windowed bin-centred tone: normalised amplitude equals the tone
 	// amplitude (0.75) to within leakage tolerance.
@@ -33,14 +33,14 @@ test_golden_sine_rms_and_hann_bin :: proc(t: ^testing.T) {
 	tone := make([]f32, FFT_N)
 	defer delete(tone)
 	frequency := f64(16 * SAMPLE_RATE) / f64(FFT_N)
-	testing.expect_value(t, audio.generate_sine(tone, SAMPLE_RATE, 1, frequency, 0.75), audio.Audio_Error.None)
-	plan: analysis.Real_FFT_Plan
-	testing.expect_value(t, analysis.real_fft_plan_init(&plan, FFT_N, .Hann), analysis.FFT_Error.None)
-	defer analysis.real_fft_plan_destroy(&plan)
-	spectrum := make([]analysis.Complex32, FFT_N / 2 + 1)
+	testing.expect_value(t, stream.generate_sine(tone, SAMPLE_RATE, 1, frequency, 0.75), stream.Audio_Error.None)
+	plan: dsp.Real_FFT_Plan
+	testing.expect_value(t, dsp.real_fft_plan_init(&plan, FFT_N, .Hann), dsp.FFT_Error.None)
+	defer dsp.real_fft_plan_destroy(&plan)
+	spectrum := make([]dsp.Complex32, FFT_N / 2 + 1)
 	defer delete(spectrum)
-	testing.expect(t, analysis.real_fft_forward(&plan, tone, spectrum), "forward")
-	amplitude := analysis.real_fft_amplitude(&plan, spectrum, 16)
+	testing.expect(t, dsp.real_fft_forward(&plan, tone, spectrum), "forward")
+	amplitude := dsp.real_fft_amplitude(&plan, spectrum, 16)
 	testing.expectf(t, math.abs(amplitude - 0.75) < 1e-3, "Hann bin amplitude: %v", amplitude)
 }
 
@@ -48,8 +48,8 @@ test_golden_sine_rms_and_hann_bin :: proc(t: ^testing.T) {
 test_golden_impulse_and_full_scale_square :: proc(t: ^testing.T) {
 	impulse := make([]f32, 64)
 	defer delete(impulse)
-	testing.expect_value(t, audio.generate_impulse(impulse, 1, 0, 1), audio.Audio_Error.None)
-	peak := analysis.sample_peak(audio.Audio_Block{frames = 64, channels = 1, interleaved = impulse})
+	testing.expect_value(t, stream.generate_impulse(impulse, 1, 0, 1), stream.Audio_Error.None)
+	peak := dsp.sample_peak(stream.Audio_Block{frames = 64, channels = 1, interleaved = impulse})
 	testing.expect(t, peak.valid, "impulse peak valid")
 	testing.expect_value(t, peak.magnitude, f32(1))
 	testing.expect_value(t, peak.frame, i64(0))
@@ -62,9 +62,9 @@ test_golden_impulse_and_full_scale_square :: proc(t: ^testing.T) {
 			square[index] = 1
 		}
 	}
-	square_rms := analysis.rms_over(square)
+	square_rms := dsp.rms_over(square)
 	testing.expect_value(t, square_rms, f32(1))
-	testing.expect_value(t, analysis.rms_to_dbfs(square_rms), f32(0))
+	testing.expect_value(t, dsp.rms_to_dbfs(square_rms), f32(0))
 }
 
 @(test)
@@ -75,12 +75,12 @@ test_partition_invariance_peak_rms_correlation :: proc(t: ^testing.T) {
 	defer delete(left)
 	right := make([]f32, FRAMES)
 	defer delete(right)
-	testing.expect_value(t, audio.generate_sine(left, 48000, 1, 997, 0.6), audio.Audio_Error.None)
-	testing.expect_value(t, audio.generate_sine(right, 48000, 1, 997, 0.3, 0.4), audio.Audio_Error.None)
+	testing.expect_value(t, stream.generate_sine(left, 48000, 1, 997, 0.6), stream.Audio_Error.None)
+	testing.expect_value(t, stream.generate_sine(right, 48000, 1, 997, 0.3, 0.4), stream.Audio_Error.None)
 	samples := make([]f32, FRAMES * CHANNELS)
 	defer delete(samples)
 	planar := [][]f32{left, right}
-	testing.expect(t, audio.interleave_f32(samples, planar, FRAMES, CHANNELS), "interleave")
+	testing.expect(t, stream.interleave_f32(samples, planar, FRAMES, CHANNELS), "interleave")
 
 	baseline := run_partitions(samples, FRAMES, CHANNELS, 128)
 	testing.expect_value(t, baseline.rms.count, 9)
@@ -126,7 +126,7 @@ test_partition_invariance_fft :: proc(t: ^testing.T) {
 	FRAMES :: 8192
 	samples := make([]f32, FRAMES)
 	defer delete(samples)
-	testing.expect_value(t, audio.generate_sine(samples, 48000, 1, 997, 0.5), audio.Audio_Error.None)
+	testing.expect_value(t, stream.generate_sine(samples, 48000, 1, 997, 0.5), stream.Audio_Error.None)
 	baseline := run_fft_partitions(t, samples, FRAMES, 1, 64)
 	testing.expect_value(t, baseline.count, 8)
 	partitions := [?]int{128, 256, 997}
@@ -152,21 +152,21 @@ test_wav_round_trip_without_binary_fixtures :: proc(t: ^testing.T) {
 	FRAMES :: 512
 	source := make([]f32, FRAMES * 2)
 	defer delete(source)
-	testing.expect_value(t, audio.generate_sine(source, 48000, 2, 440, 0.8), audio.Audio_Error.None)
+	testing.expect_value(t, stream.generate_sine(source, 48000, 2, 440, 0.8), stream.Audio_Error.None)
 
-	formats := [?]audio.Sample_Format{.U8, .S16, .S24, .S32, .F32, .F64}
+	formats := [?]stream.Sample_Format{.U8, .S16, .S24, .S32, .F32, .F64}
 	for format in formats {
-		descriptor := audio.Audio_Stream_Descriptor{
+		descriptor := stream.Audio_Stream_Descriptor{
 			sample_rate = 48000,
 			channels = 2,
 			channel_layout = .Stereo,
 			sample_format = format,
 			total_frames = FRAMES,
 		}
-		bytes, err := audio.wav_encode(source, descriptor)
-		testing.expect_value(t, err, audio.Audio_Error.None)
-		decoded, decode_err := audio.wav_decode(bytes)
-		testing.expect_value(t, decode_err, audio.Audio_Error.None)
+		bytes, err := stream.wav_encode(source, descriptor)
+		testing.expect_value(t, err, stream.Audio_Error.None)
+		decoded, decode_err := stream.wav_decode(bytes)
+		testing.expect_value(t, decode_err, stream.Audio_Error.None)
 		testing.expect_value(t, decoded.descriptor.total_frames, i64(FRAMES))
 		scale: f64 = 0
 		switch format {
@@ -194,7 +194,7 @@ test_wav_round_trip_without_binary_fixtures :: proc(t: ^testing.T) {
 		testing.expectf(t, mismatches == 0, "%v: %d mismatches, first at %d (%v vs %v)",
 			format, mismatches, first_mismatch,
 			decoded.samples[max(first_mismatch, 0)], source[max(first_mismatch, 0)])
-		audio.wav_audio_destroy(&decoded)
+		stream.wav_audio_destroy(&decoded)
 		delete(bytes)
 	}
 }
@@ -204,7 +204,7 @@ test_repeatable_measurement_records :: proc(t: ^testing.T) {
 	FRAMES :: 10000
 	samples := make([]f32, FRAMES * 2)
 	defer delete(samples)
-	testing.expect_value(t, audio.generate_two_tone(samples, 48000, 2, 440, 0.4, 997, 0.2), audio.Audio_Error.None)
+	testing.expect_value(t, stream.generate_two_tone(samples, 48000, 2, 440, 0.4, 997, 0.2), stream.Audio_Error.None)
 
 	first := run_partitions(samples, FRAMES, 2, 256)
 	second := run_partitions(samples, FRAMES, 2, 256)
@@ -243,9 +243,9 @@ test_bounded_memory_ceiling :: proc(t: ^testing.T) {
 	counter := Counting_Allocator{backing = context.allocator}
 	allocator := counting_allocator(&counter)
 
-	plan: analysis.Real_FFT_Plan
-	testing.expect_value(t, analysis.real_fft_plan_init(&plan, 4096, .Blackman_Harris, allocator), analysis.FFT_Error.None)
-	defer analysis.real_fft_plan_destroy(&plan)
+	plan: dsp.Real_FFT_Plan
+	testing.expect_value(t, dsp.real_fft_plan_init(&plan, 4096, .Blackman_Harris, allocator), dsp.FFT_Error.None)
+	defer dsp.real_fft_plan_destroy(&plan)
 
 	ring: transport.Audio_Ring
 	testing.expect(t, transport.audio_ring_init(&ring, 32, 512, 2, 0, 0, allocator), "ring init")
@@ -253,25 +253,25 @@ test_bounded_memory_ceiling :: proc(t: ^testing.T) {
 
 	samples := make([]f32, 4096 * 2, allocator)
 	defer delete(samples, allocator)
-	testing.expect_value(t, audio.generate_sine(samples, 48000, 2, 440, 0.5), audio.Audio_Error.None)
-	descriptor := audio.Audio_Stream_Descriptor{
+	testing.expect_value(t, stream.generate_sine(samples, 48000, 2, 440, 0.5), stream.Audio_Error.None)
+	descriptor := stream.Audio_Stream_Descriptor{
 		sample_rate = 48000,
 		channels = 2,
 		channel_layout = .Stereo,
 		sample_format = .F32,
 	}
-	bytes, err := audio.wav_encode(samples, descriptor, allocator)
-	testing.expect_value(t, err, audio.Audio_Error.None)
-	decoded, decode_err := audio.wav_decode(bytes, 0, allocator)
-	testing.expect_value(t, decode_err, audio.Audio_Error.None)
-	audio.wav_audio_destroy(&decoded)
+	bytes, err := stream.wav_encode(samples, descriptor, allocator)
+	testing.expect_value(t, err, stream.Audio_Error.None)
+	decoded, decode_err := stream.wav_decode(bytes, 0, allocator)
+	testing.expect_value(t, decode_err, stream.Audio_Error.None)
+	stream.wav_audio_destroy(&decoded)
 	mem.free(raw_data(bytes), allocator)
 
-	spectrum := make([]analysis.Complex32, 2049, allocator)
+	spectrum := make([]dsp.Complex32, 2049, allocator)
 	defer delete(spectrum, allocator)
-	testing.expect(t, analysis.real_fft_forward(&plan, samples[:4096], spectrum), "forward")
-	window: analysis.RMS_Window
-	testing.expect(t, analysis.rms_window_init(&window, 1024, 2), "rms init")
+	testing.expect(t, dsp.real_fft_forward(&plan, samples[:4096], spectrum), "forward")
+	window: dsp.RMS_Window
+	testing.expect(t, dsp.rms_window_init(&window, 1024, 2), "rms init")
 
 	fmt.printf("bounded-memory peak: %d bytes over %d allocations (ceiling %d)\n", counter.peak, counter.allocs, CEILING)
 	testing.expectf(t, counter.peak <= CEILING, "peak %d exceeds ceiling %d", counter.peak, CEILING)

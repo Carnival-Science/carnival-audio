@@ -1,9 +1,9 @@
-package analysis
+package dsp
 
 import "core:math"
 import "core:testing"
 
-import audio "pulse:core/audio"
+import "carnival:core/stream"
 
 RMS_Test_Context :: struct {
 	count:    int,
@@ -46,7 +46,7 @@ correlation_test_callback :: proc(user: rawptr, record: Correlation_Record) {
 @(test)
 test_sample_peak_exact_and_partition_independent :: proc(t: ^testing.T) {
 	samples := [?]f32{0.1, -0.2, 0.8, 0.3, -0.8, 0.4}
-	block := audio.Audio_Block{start_frame = 100, frames = 2, channels = 2, interleaved = samples[:4]}
+	block := stream.Audio_Block{start_frame = 100, frames = 2, channels = 2, interleaved = samples[:4]}
 	peak := sample_peak(block)
 	testing.expect(t, peak.valid, "peak valid")
 	testing.expect_value(t, peak.magnitude, f32(0.8))
@@ -56,7 +56,7 @@ test_sample_peak_exact_and_partition_independent :: proc(t: ^testing.T) {
 	acc: Peak_Accumulator
 	testing.expect(t, peak_accumulator_init(&acc, 2), "init")
 	testing.expect(t, peak_accumulator_process(&acc, block), "process first")
-	rest := audio.Audio_Block{start_frame = 102, frames = 1, channels = 2, interleaved = samples[4:]}
+	rest := stream.Audio_Block{start_frame = 102, frames = 1, channels = 2, interleaved = samples[4:]}
 	testing.expect(t, peak_accumulator_process(&acc, rest), "process second")
 	testing.expect_value(t, acc.overall.magnitude, f32(0.8))
 	testing.expect_value(t, acc.overall.frame, i64(101))
@@ -88,12 +88,12 @@ test_rms_window_closed_form :: proc(t: ^testing.T) {
 	channels := 2
 	samples := make([]f32, frames * channels)
 	defer delete(samples)
-	testing.expect_value(t, audio.generate_sine(samples, 48000, channels, 1000, 1.0), audio.Audio_Error.None)
+	testing.expect_value(t, stream.generate_sine(samples, 48000, channels, 1000, 1.0), stream.Audio_Error.None)
 
 	window: RMS_Window
 	testing.expect(t, rms_window_init(&window, 480, channels), "init")
 	ctx := RMS_Test_Context{start_ok = true}
-	block := audio.Audio_Block{start_frame = 0, frames = frames, channels = channels, interleaved = samples}
+	block := stream.Audio_Block{start_frame = 0, frames = frames, channels = channels, interleaved = samples}
 	testing.expect(t, rms_window_process(&window, block, rms_test_callback, &ctx), "process")
 	testing.expect_value(t, ctx.count, 10)
 	testing.expect(t, ctx.start_ok, "windows are sample-clock aligned")
@@ -102,7 +102,7 @@ test_rms_window_closed_form :: proc(t: ^testing.T) {
 	testing.expect(t, ctx.last.rms[0] == ctx.last.rms[1], "identical channels")
 
 	// A non-contiguous block must be rejected, not silently accumulated.
-	gap := audio.Audio_Block{start_frame = 9999, frames = 10, channels = channels, interleaved = samples[:20]}
+	gap := stream.Audio_Block{start_frame = 9999, frames = 10, channels = channels, interleaved = samples[:20]}
 	testing.expect(t, !rms_window_process(&window, gap, rms_test_callback, &ctx), "gap rejected")
 	testing.expect_value(t, ctx.count, 10)
 }
@@ -116,7 +116,7 @@ test_rms_window_silence_and_dc :: proc(t: ^testing.T) {
 	window: RMS_Window
 	testing.expect(t, rms_window_init(&window, frames, channels), "init")
 	ctx: RMS_Count_Context
-	block := audio.Audio_Block{start_frame = 0, frames = frames, channels = channels, interleaved = samples}
+	block := stream.Audio_Block{start_frame = 0, frames = frames, channels = channels, interleaved = samples}
 	testing.expect(t, rms_window_process(&window, block, rms_count_callback, &ctx), "process silence")
 	testing.expect_value(t, ctx.record.rms[0], f32(0))
 	testing.expect_value(t, rms_to_dbfs(ctx.record.rms[0]), DBFS_FLOOR)
@@ -124,7 +124,7 @@ test_rms_window_silence_and_dc :: proc(t: ^testing.T) {
 	for index in 0 ..< frames {
 		samples[index] = 0.25
 	}
-	dc_block := audio.Audio_Block{start_frame = i64(frames), frames = frames, channels = channels, interleaved = samples}
+	dc_block := stream.Audio_Block{start_frame = i64(frames), frames = frames, channels = channels, interleaved = samples}
 	testing.expect(t, rms_window_process(&window, dc_block, rms_count_callback, &ctx), "process DC")
 	testing.expect_value(t, ctx.record.rms[0], f32(0.25))
 }
@@ -148,7 +148,7 @@ test_peak_hold_hold_and_decay :: proc(t: ^testing.T) {
 			samples[0] = 0
 		}
 		samples[1] = 0
-		block := audio.Audio_Block{start_frame = i64(frame), frames = 1, channels = 2, interleaved = samples}
+		block := stream.Audio_Block{start_frame = i64(frame), frames = 1, channels = 2, interleaved = samples}
 		testing.expect(t, peak_hold_process(&hold, block), "process frame")
 		history[frame] = hold.held[0]
 	}
@@ -171,10 +171,10 @@ test_peak_hold_hold_and_decay :: proc(t: ^testing.T) {
 		db_decay_per_second = 6.0205999, // halve amplitude per second
 	}), "init log")
 	one := [1]f32{1}
-	_ = peak_hold_process(&log_hold, audio.Audio_Block{frames = 1, channels = 1, interleaved = one[:]})
+	_ = peak_hold_process(&log_hold, stream.Audio_Block{frames = 1, channels = 1, interleaved = one[:]})
 	zeros := make([]f32, 48000)
 	defer delete(zeros)
-	_ = peak_hold_process(&log_hold, audio.Audio_Block{start_frame = 1, frames = 48000, channels = 1, interleaved = zeros})
+	_ = peak_hold_process(&log_hold, stream.Audio_Block{start_frame = 1, frames = 48000, channels = 1, interleaved = zeros})
 	testing.expectf(t, math.abs(log_hold.held[0] - 0.5) < 0.001, "one second at 6.02 dB/s is ~0.5: %v", log_hold.held[0])
 }
 
@@ -185,7 +185,7 @@ test_correlation_cases :: proc(t: ^testing.T) {
 	defer delete(left)
 	right := make([]f32, frames)
 	defer delete(right)
-	testing.expect_value(t, audio.generate_sine(left, 48000, 1, 997, 0.5), audio.Audio_Error.None)
+	testing.expect_value(t, stream.generate_sine(left, 48000, 1, 997, 0.5), stream.Audio_Error.None)
 
 	copy(right, left)
 	value, valid := stereo_correlation(left, right)
@@ -195,7 +195,7 @@ test_correlation_cases :: proc(t: ^testing.T) {
 	}
 	value, valid = stereo_correlation(left, right)
 	testing.expect(t, valid && value < -0.9999 && value >= -1, "inverted channels correlate -1")
-	testing.expect_value(t, audio.generate_sine(right, 48000, 1, 997, 0.5, math.PI / 2), audio.Audio_Error.None)
+	testing.expect_value(t, stream.generate_sine(right, 48000, 1, 997, 0.5, math.PI / 2), stream.Audio_Error.None)
 	value, valid = stereo_correlation(left, right)
 	testing.expect(t, valid && math.abs(value) < 0.01, "quadrature channels correlate ~0")
 
@@ -221,17 +221,17 @@ test_correlation_window_alignment :: proc(t: ^testing.T) {
 	channels := 2
 	samples := make([]f32, frames * channels)
 	defer delete(samples)
-	testing.expect_value(t, audio.generate_sine(samples, 48000, channels, 1000, 0.5), audio.Audio_Error.None)
+	testing.expect_value(t, stream.generate_sine(samples, 48000, channels, 1000, 0.5), stream.Audio_Error.None)
 
 	window: Correlation_Window
 	testing.expect(t, correlation_window_init(&window, 256), "init")
 	ctx: Correlation_Test_Context
-	block := audio.Audio_Block{frames = frames, channels = channels, interleaved = samples}
+	block := stream.Audio_Block{frames = frames, channels = channels, interleaved = samples}
 	testing.expect(t, correlation_window_process(&window, block, correlation_test_callback, &ctx), "process")
 	testing.expect_value(t, ctx.count, 2)
 	testing.expect(t, ctx.valids[0] && ctx.valids[1], "valid windows")
 	testing.expect(t, ctx.values[0] > 0.9999 && ctx.values[1] > 0.9999, "identical stereo = +1")
 
-	gap := audio.Audio_Block{start_frame = 1024, frames = 2, channels = 2, interleaved = samples[:4]}
+	gap := stream.Audio_Block{start_frame = 1024, frames = 2, channels = 2, interleaved = samples[:4]}
 	testing.expect(t, !correlation_window_process(&window, gap, correlation_test_callback, &ctx), "gap rejected")
 }

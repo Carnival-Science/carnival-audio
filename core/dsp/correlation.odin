@@ -7,11 +7,11 @@
 // CORRELATION_VARIANCE_EPSILON (including digital silence and DC), the result is
 // value 0 with valid=false. A valid result is clamped to [-1, 1]. NaN is never
 // returned.
-package analysis
+package dsp
 
 import "core:math"
 
-import audio "pulse:core/audio"
+import "carnival:core/stream"
 
 // Correlation_Record is one complete, non-overlapping stereo correlation window.
 Correlation_Record :: struct {
@@ -60,11 +60,11 @@ Correlation_Window_Callback :: #type proc(user_data: rawptr, record: Correlation
 
 correlation_window_process :: proc(
 	window: ^Correlation_Window,
-	block: audio.Audio_Block,
+	block: stream.Audio_Block,
 	callback: Correlation_Window_Callback,
 	user_data: rawptr = nil,
 ) -> bool {
-	if !audio.audio_block_valid(block) || block.channels != 2 || window.window_frames < 1 {
+	if !stream.audio_block_valid(block) || block.channels != 2 || window.window_frames < 1 {
 		return false
 	}
 	if block.start_frame != window.next_frame {
