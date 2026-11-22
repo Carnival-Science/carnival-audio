@@ -25,4 +25,16 @@ foreach ($package in $packages) {
 }
 
 Write-Host "build: ok ($($packages.Count) packages)"
+
+# Windows CLAP artifacts are a single DLL whose file name ends in `.clap`; see
+# the CLAP entry-point documentation (there is no bundle directory on Windows).
+# The exported symbol is `clap_entry`.
+$pluginPath = Join-Path $repoRoot 'out\pulse.clap'
+Write-Host "build plugin $pluginPath"
+& $Odin build (Join-Path $repoRoot 'products\pulse') "-collection:carnival=$repoRoot" `
+    -build-mode:dll -define:PULSE_PLUGIN_BUILD=true -out:$pluginPath -o:minimal
+if ($LASTEXITCODE -ne 0) {
+    exit $LASTEXITCODE
+}
+Write-Host "build: plugin ok"
 exit 0
