@@ -1,9 +1,29 @@
 package transport
 
+import "core:fmt"
+import "core:os"
+import "core:strconv"
+import "core:sync"
 import "core:testing"
 import "core:thread"
 
 import "carnival:core/stream"
+
+// stress_count reads a positive integer from `name`, falling back to `fallback`.
+// The default keeps CI deterministic; a developer can enlarge the run with an
+// environment variable without changing the test source.
+stress_count :: proc(name: string, fallback: int) -> int {
+	value := os.get_env(name, context.allocator)
+	defer delete(value, context.allocator)
+	if value == "" {
+		return fallback
+	}
+	parsed, ok := strconv.parse_int(value)
+	if !ok || parsed < 1 {
+		return fallback
+	}
+	return parsed
+}
 
 @(test)
 test_ring_order_wrap_and_depth :: proc(t: ^testing.T) {
@@ -22,17 +42,20 @@ test_ring_order_wrap_and_depth :: proc(t: ^testing.T) {
 			channels = 2,
 			interleaved = block_samples[:],
 		}
-		testing.expect(t, audio_ring_write(&ring, block), "write")
+		testing.expect_value(t, audio_ring_push(&ring, block, u64(1000 + block_index * 2)), Audio_Ring_Push_Status.Accepted)
 	}
 	testing.expect_value(t, audio_ring_depth(&ring), u64(4))
 	testing.expect_value(t, audio_ring_high_water(&ring), u64(4))
+	testing.expect_value(t, audio_ring_source_frame_pos(&ring), u64(1008))
 
 	buffer: [4]f32
 	for block_index in 0 ..< 4 {
 		result := audio_ring_read(&ring, buffer[:])
 		testing.expect(t, result.ok, "read")
 		testing.expect_value(t, result.start_frame, i64(1000 + block_index * 2))
+		testing.expect_value(t, result.frames, 2)
 		testing.expect_value(t, result.epoch, u64(3))
+		testing.expect_value(t, result.continuity_epoch, u64(0))
 		for index in 0 ..< 4 {
 			testing.expect_value(t, buffer[index], f32(block_index * 10 + index))
 		}
@@ -44,59 +67,204 @@ test_ring_order_wrap_and_depth :: proc(t: ^testing.T) {
 		for index in 0 ..< 4 {
 			block_samples[index] = f32(block_index * 10 + index)
 		}
+		source_index := u64(1000 + block_index * 2)
 		block := stream.Audio_Block{
-			start_frame = i64(1000 + block_index * 2),
+			start_frame = i64(source_index),
 			frames = 2,
 			channels = 2,
 			interleaved = block_samples[:],
 		}
-		testing.expect(t, audio_ring_write(&ring, block), "write after wrap")
+		testing.expect_value(t, audio_ring_push(&ring, block, source_index), Audio_Ring_Push_Status.Accepted)
 	}
 	result := audio_ring_read(&ring, buffer[:])
 	testing.expect(t, result.ok && result.start_frame == 1008, "wrapped read starts at block 4")
 	testing.expect_value(t, buffer[0], f32(40))
 
-	// The sample clock is explicit: a mismatched start frame is rejected and is
-	// not reported as an overrun.
-	wrong_clock := stream.Audio_Block{start_frame = 9999, frames = 2, channels = 2, interleaved = block_samples[:]}
-	testing.expect(t, !audio_ring_write(&ring, wrong_clock), "clock mismatch rejected")
-	testing.expect(t, !audio_ring_overrun_seen(&ring), "clock mismatch is not an overrun")
+	// The explicit source index and the block's start frame must agree.
+	mismatched := stream.Audio_Block{start_frame = 1016, frames = 2, channels = 2, interleaved = block_samples[:]}
+	testing.expect_value(t, audio_ring_push(&ring, mismatched, 9999), Audio_Ring_Push_Status.Rejected_Invalid)
+
+	// A backward source index is a duplicate, not a clock mismatch and not an
+	// overrun.
+	backward := stream.Audio_Block{start_frame = 999, frames = 2, channels = 2, interleaved = block_samples[:]}
+	testing.expect_value(t, audio_ring_push(&ring, backward, 999), Audio_Ring_Push_Status.Rejected_Duplicate)
+	testing.expect_value(t, audio_ring_duplicate_blocks(&ring), u64(1))
+	testing.expect(t, !audio_ring_overrun_seen(&ring), "duplicate is not an overrun")
+
 	block := stream.Audio_Block{start_frame = 1016, frames = 2, channels = 2, interleaved = block_samples[:]}
-	testing.expect(t, audio_ring_write(&ring, block), "correct clock accepted")
+	testing.expect_value(t, audio_ring_push(&ring, block, 1016), Audio_Ring_Push_Status.Accepted)
 	testing.expect(t, !audio_ring_overrun_seen(&ring), "no overrun")
 	testing.expect_value(t, audio_ring_dropped_blocks(&ring), u64(0))
 }
 
 @(test)
-test_ring_overrun_is_sticky_until_reset :: proc(t: ^testing.T) {
+test_ring_overrun_is_sticky_and_advances_source_clock :: proc(t: ^testing.T) {
 	ring: Audio_Ring
 	testing.expect(t, audio_ring_init(&ring, 2, 1, 1), "init")
 	defer audio_ring_destroy(&ring)
 	value := [1]f32{1}
 	block := stream.Audio_Block{frames = 1, channels = 1, interleaved = value[:]}
-	testing.expect(t, audio_ring_write(&ring, block), "write 1")
+	testing.expect_value(t, audio_ring_push(&ring, block, 0), Audio_Ring_Push_Status.Accepted)
 	block.start_frame = 1
-	testing.expect(t, audio_ring_write(&ring, block), "write 2")
+	testing.expect_value(t, audio_ring_push(&ring, block, 1), Audio_Ring_Push_Status.Accepted)
 	block.start_frame = 2
-	testing.expect(t, !audio_ring_write(&ring, block), "write 3 overruns")
+	testing.expect_value(t, audio_ring_push(&ring, block, 2), Audio_Ring_Push_Status.Dropped_Overrun)
 	testing.expect(t, audio_ring_overrun_seen(&ring), "overrun latched")
 	testing.expect_value(t, audio_ring_dropped_blocks(&ring), u64(1))
+	testing.expect_value(t, audio_ring_source_frame_pos(&ring), u64(3))
+
+	// The dropped range is in the ledger; a live producer cannot resubmit it.
+	gap: Discontinuity
+	testing.expect(t, audio_ring_next_discontinuity(&ring, &gap), "overrun recorded as a gap")
+	testing.expect_value(t, gap.start_frame, u64(2))
+	testing.expect_value(t, gap.frames, u64(1))
+	testing.expect_value(t, gap.reason, Discontinuity_Reason.Overrun_Drop)
+	testing.expect_value(t, gap.continuity_epoch, u64(1))
 
 	buffer: [1]f32
 	testing.expect(t, audio_ring_read(&ring, buffer[:]).ok, "drain one")
-	testing.expect(t, audio_ring_write(&ring, block), "write after drain succeeds")
+	testing.expect_value(t, audio_ring_push(&ring, block, 2), Audio_Ring_Push_Status.Rejected_Duplicate)
+	testing.expect_value(t, audio_ring_duplicate_blocks(&ring), u64(1))
+	block.start_frame = 3
+	testing.expect_value(t, audio_ring_push(&ring, block, 3), Audio_Ring_Push_Status.Accepted)
+
+	// The queued pre-gap block still belongs to segment 0; the block produced
+	// after the gap belongs to segment 1.
+	pre_gap := audio_ring_read(&ring, buffer[:])
+	testing.expect(t, pre_gap.ok && pre_gap.start_frame == 1, "pre-gap block remains readable")
+	testing.expect_value(t, pre_gap.continuity_epoch, u64(0))
 	testing.expect(t, audio_ring_overrun_seen(&ring), "latch remains after recovery")
+	next := audio_ring_read(&ring, buffer[:])
+	testing.expect(t, next.ok && next.start_frame == 3, "post-overrun block uses new segment")
+	testing.expect_value(t, next.continuity_epoch, u64(1))
 
 	audio_ring_reset(&ring)
 	testing.expect(t, !audio_ring_overrun_seen(&ring), "reset clears latch")
 	testing.expect_value(t, audio_ring_dropped_blocks(&ring), u64(0))
+	testing.expect_value(t, audio_ring_duplicate_blocks(&ring), u64(0))
 	testing.expect_value(t, audio_ring_depth(&ring), u64(0))
+	testing.expect_value(t, audio_ring_source_frame_pos(&ring), u64(0))
+	testing.expect_value(t, audio_ring_gaps_pending(&ring), u64(0))
 	block.start_frame = 0
-	testing.expect(t, audio_ring_write(&ring, block), "write after reset")
+	testing.expect_value(t, audio_ring_push(&ring, block, 0), Audio_Ring_Push_Status.Accepted)
+}
+
+@(test)
+test_ring_source_gap_ledger_and_resubmission :: proc(t: ^testing.T) {
+	ring: Audio_Ring
+	testing.expect(t, audio_ring_init(&ring, 8, 64, 2, 0, 7), "init")
+	defer audio_ring_destroy(&ring)
+
+	samples := make([]f32, 64 * 2)
+	defer delete(samples)
+	buffer := make([]f32, 64 * 2)
+	defer delete(buffer)
+
+	first := stream.Audio_Block{start_frame = 0, frames = 32, channels = 2, interleaved = samples[:64]}
+	testing.expect_value(t, audio_ring_push(&ring, first, 0), Audio_Ring_Push_Status.Accepted)
+	second := stream.Audio_Block{start_frame = 32, frames = 32, channels = 2, interleaved = samples[:64]}
+	testing.expect_value(t, audio_ring_push(&ring, second, 32), Audio_Ring_Push_Status.Accepted)
+	testing.expect(t, audio_ring_read(&ring, buffer).ok, "read first")
+	testing.expect(t, audio_ring_read(&ring, buffer).ok, "read second")
+	testing.expect_value(t, audio_ring_gaps_pending(&ring), u64(0))
+
+	// A real dropped range: 64..95 never reached the ring.
+	gapped := stream.Audio_Block{start_frame = 96, frames = 16, channels = 2, interleaved = samples[:32]}
+	testing.expect_value(t, audio_ring_push(&ring, gapped, 96), Audio_Ring_Push_Status.Accepted_With_Gap)
+	testing.expect_value(t, audio_ring_source_frame_pos(&ring), u64(112))
+
+	gap: Discontinuity
+	testing.expect(t, audio_ring_next_discontinuity(&ring, &gap), "gap recorded")
+	testing.expect_value(t, gap.epoch, u64(7))
+	testing.expect_value(t, gap.continuity_epoch, u64(1))
+	testing.expect_value(t, gap.start_frame, u64(64))
+	testing.expect_value(t, gap.frames, u64(32))
+	testing.expect_value(t, gap.reason, Discontinuity_Reason.Source_Gap)
+
+	read := audio_ring_read(&ring, buffer)
+	testing.expect(t, read.ok, "post-gap read")
+	testing.expect_value(t, read.start_frame, i64(96))
+	testing.expect_value(t, read.frames, 16)
+	testing.expect_value(t, read.continuity_epoch, u64(1))
+
+	// Resubmitting the missing range, or an already-consumed block, is a
+	// duplicate: the source clock advanced exactly once.
+	missing := stream.Audio_Block{start_frame = 64, frames = 32, channels = 2, interleaved = samples[:64]}
+	testing.expect_value(t, audio_ring_push(&ring, missing, 64), Audio_Ring_Push_Status.Rejected_Duplicate)
+	testing.expect_value(t, audio_ring_push(&ring, gapped, 96), Audio_Ring_Push_Status.Rejected_Duplicate)
+	testing.expect_value(t, audio_ring_duplicate_blocks(&ring), u64(2))
+
+	after_gap := stream.Audio_Block{start_frame = 112, frames = 8, channels = 2, interleaved = samples[:16]}
+	testing.expect_value(t, audio_ring_push(&ring, after_gap, 112), Audio_Ring_Push_Status.Accepted)
+	testing.expect_value(t, audio_ring_read(&ring, buffer).continuity_epoch, u64(1))
+
+	// A second forward jump records its own absolute range.
+	later := stream.Audio_Block{start_frame = 200, frames = 8, channels = 2, interleaved = samples[:16]}
+	testing.expect_value(t, audio_ring_push(&ring, later, 200), Audio_Ring_Push_Status.Accepted_With_Gap)
+	testing.expect(t, audio_ring_next_discontinuity(&ring, &gap), "second gap recorded")
+	testing.expect_value(t, gap.start_frame, u64(120))
+	testing.expect_value(t, gap.frames, u64(80))
+	testing.expect_value(t, gap.continuity_epoch, u64(2))
+	testing.expect_value(t, audio_ring_gaps_recorded(&ring), u64(2))
+	testing.expect_value(t, audio_ring_gaps_pending(&ring), u64(0))
+}
+
+@(test)
+test_ring_variable_block_lengths :: proc(t: ^testing.T) {
+	ring: Audio_Ring
+	testing.expect(t, audio_ring_init(&ring, 3, 4096, 2, 0, 1), "init")
+	defer audio_ring_destroy(&ring)
+
+	sizes := [?]int{32, 64, 33, 1024, 4096, 1, 4095, 128, 2048, 17}
+	buffer := make([]f32, 4096 * 2)
+	defer delete(buffer)
+	source := make([]f32, 4096 * 2)
+	defer delete(source)
+
+	position := u64(0)
+	for size, iteration in sizes {
+		for frame in 0 ..< size {
+			for channel in 0 ..< 2 {
+				source[frame * 2 + channel] = f32((position + u64(frame)) % 4096)
+			}
+		}
+		block := stream.Audio_Block{
+			start_frame = i64(position),
+			frames = size,
+			channels = 2,
+			interleaved = source[:size * 2],
+		}
+		testing.expect_value(t, audio_ring_push(&ring, block, position), Audio_Ring_Push_Status.Accepted)
+		position += u64(size)
+
+		// A too-small destination reports the required size and leaves the
+		// block queued.
+		small: [8]f32
+		if size * 2 > len(small) {
+			short := audio_ring_read(&ring, small[:])
+			testing.expect(t, !short.ok, "small destination rejected")
+			testing.expect_value(t, short.frames, size)
+		}
+		read := audio_ring_read(&ring, buffer)
+		testing.expect(t, read.ok, "variable read")
+		testing.expect_value(t, read.frames, size)
+		testing.expect_value(t, read.start_frame, i64(position - u64(size)))
+		for sample_index in 0 ..< size * 2 {
+			testing.expect_value(t, buffer[sample_index], source[sample_index])
+		}
+		_ = iteration
+	}
+	testing.expect_value(t, audio_ring_source_frame_pos(&ring), position)
+	testing.expect(t, !audio_ring_read(&ring, buffer).ok, "drained")
+	testing.expect_value(t, audio_ring_duplicate_blocks(&ring), u64(0))
+	testing.expect(t, !audio_ring_overrun_seen(&ring), "no overrun")
+	testing.expect_value(t, audio_ring_gaps_pending(&ring), u64(0))
 }
 
 Ring_Thread_Context :: struct {
 	ring:           ^Audio_Ring,
+	block_frames:   int,
+	channels:       int,
 	expected_blocks: u64,
 	received:       u64,
 	mismatches:     int,
@@ -111,11 +279,14 @@ ring_consumer :: proc(data: rawptr) {
 			thread.yield()
 			continue
 		}
-		if result.start_frame != i64(ctx.received * u64(ctx.ring.block_frames)) {
+		if result.start_frame != i64(ctx.received * u64(ctx.block_frames)) {
+			ctx.mismatches += 1
+		}
+		if result.frames != ctx.block_frames || result.continuity_epoch != 0 {
 			ctx.mismatches += 1
 		}
 		expected := f32(ctx.received)
-		for sample in ctx.buffer[:result.frames * ctx.ring.channels] {
+		for sample in ctx.buffer[:result.frames * ctx.channels] {
 			if sample != expected {
 				ctx.mismatches += 1
 			}
@@ -135,6 +306,8 @@ test_ring_spsc_threaded :: proc(t: ^testing.T) {
 
 	ctx := Ring_Thread_Context{
 		ring = &ring,
+		block_frames = block_frames,
+		channels = channels,
 		expected_blocks = total_blocks,
 		buffer = make([]f32, block_frames * channels),
 	}
@@ -148,14 +321,16 @@ test_ring_spsc_threaded :: proc(t: ^testing.T) {
 		for index in 0 ..< len(block_samples) {
 			block_samples[index] = f32(block_index)
 		}
+		source_index := block_index * u64(block_frames)
 		block := stream.Audio_Block{
-			start_frame = i64(block_index * u64(block_frames)),
+			start_frame = i64(source_index),
 			frames = block_frames,
 			channels = channels,
 			interleaved = block_samples,
 		}
 		for {
-			if audio_ring_depth(&ring) < u64(ring.capacity_blocks) && audio_ring_write(&ring, block) {
+			if audio_ring_depth(&ring) < u64(ring.capacity_blocks) &&
+				audio_ring_push(&ring, block, source_index) == .Accepted {
 				break
 			}
 			thread.yield()
@@ -169,6 +344,242 @@ test_ring_spsc_threaded :: proc(t: ^testing.T) {
 	testing.expect_value(t, audio_ring_dropped_blocks(&ring), u64(0))
 	testing.expect(t, !audio_ring_overrun_seen(&ring), "no overrun in threaded run")
 	testing.expect_value(t, audio_ring_depth(&ring), u64(0))
+}
+
+// Ring stress: a producer emits irregular block sizes 1..4096 with occasional
+// source skips; a consumer validates block data, absolute positions, segments
+// and every ledger record.
+Ring_Stress_Event_Kind :: enum u8 {
+	Block,
+	Gap,
+}
+
+Ring_Stress_Event :: struct {
+	kind:        Ring_Stress_Event_Kind,
+	start_frame: u64,
+	frames:      u64,
+	segment:     u64,
+}
+
+Ring_Stress_Producer :: struct {
+	ring:        ^Audio_Ring,
+	events:      []Ring_Stress_Event,
+	done:        u64, // atomic
+	channels:    int,
+	buffer:      []f32,
+	unexpected:  int, // writer-owned; read after join
+}
+
+Ring_Stress_Consumer :: struct {
+	ring:        ^Audio_Ring,
+	events:      []Ring_Stress_Event,
+	done:        ^u64,
+	channels:    int,
+	buffer:      []f32,
+	blocks:      int,
+	gaps:        int,
+	mismatches:  int,
+	missing:     int,
+}
+
+ring_stress_fill :: proc(buffer: []f32, start_frame: u64, frames, channels: int) {
+	for frame in 0 ..< frames {
+		value := f32((start_frame + u64(frame)) % 4096)
+		for channel in 0 ..< channels {
+			buffer[frame * channels + channel] = value
+		}
+	}
+}
+
+ring_stress_producer_thread :: proc(data: rawptr) {
+	ctx := cast(^Ring_Stress_Producer)data
+	for event in ctx.events {
+		if event.kind != .Block {
+			continue
+		}
+		ring_stress_fill(ctx.buffer, event.start_frame, int(event.frames), ctx.channels)
+		block := stream.Audio_Block{
+			start_frame = i64(event.start_frame),
+			frames = int(event.frames),
+			channels = ctx.channels,
+			interleaved = ctx.buffer[:int(event.frames) * ctx.channels],
+		}
+		for {
+			if audio_ring_depth(ctx.ring) < u64(ctx.ring.capacity_blocks) {
+				status := audio_ring_push(ctx.ring, block, event.start_frame)
+				if status == .Accepted || status == .Accepted_With_Gap {
+					break
+				}
+				ctx.unexpected += 1
+				break
+			}
+			thread.yield()
+		}
+	}
+	sync.atomic_store_explicit(&ctx.done, 1, .Release)
+}
+
+ring_stress_wait_gap :: proc(ctx: ^Ring_Stress_Consumer, discontinuity: ^Discontinuity) -> bool {
+	for {
+		if audio_ring_next_discontinuity(ctx.ring, discontinuity) {
+			return true
+		}
+		if sync.atomic_load_explicit(ctx.done, .Acquire) != 0 &&
+			audio_ring_gaps_pending(ctx.ring) == 0 {
+			return false
+		}
+		thread.yield()
+	}
+}
+
+ring_stress_wait_block :: proc(ctx: ^Ring_Stress_Consumer, result: ^Audio_Ring_Read) -> bool {
+	for {
+		result^ = audio_ring_read(ctx.ring, ctx.buffer)
+		if result.ok {
+			return true
+		}
+		if sync.atomic_load_explicit(ctx.done, .Acquire) != 0 &&
+			audio_ring_depth(ctx.ring) == 0 {
+			return false
+		}
+		thread.yield()
+	}
+}
+
+ring_stress_consumer_thread :: proc(data: rawptr) {
+	ctx := cast(^Ring_Stress_Consumer)data
+	result: Audio_Ring_Read
+	discontinuity: Discontinuity
+	for event in ctx.events {
+		switch event.kind {
+		case .Gap:
+			if !ring_stress_wait_gap(ctx, &discontinuity) {
+				ctx.missing += 1
+				return
+			}
+			ctx.gaps += 1
+			if discontinuity.start_frame != event.start_frame ||
+				discontinuity.frames != event.frames ||
+				discontinuity.continuity_epoch != event.segment ||
+				discontinuity.epoch != 5 ||
+				discontinuity.reason != .Source_Gap {
+				ctx.mismatches += 1
+			}
+		case .Block:
+			if !ring_stress_wait_block(ctx, &result) {
+				ctx.missing += 1
+				return
+			}
+			ctx.blocks += 1
+			if result.start_frame != i64(event.start_frame) ||
+				result.frames != int(event.frames) ||
+				result.continuity_epoch != event.segment ||
+				result.epoch != 5 {
+				ctx.mismatches += 1
+			}
+			for frame in 0 ..< result.frames {
+				expected := f32((event.start_frame + u64(frame)) % 4096)
+				for channel in 0 ..< ctx.channels {
+					if ctx.buffer[frame * ctx.channels + channel] != expected {
+						ctx.mismatches += 1
+					}
+				}
+			}
+		}
+	}
+}
+
+ring_stress_build_events :: proc(target_blocks: int) -> [dynamic]Ring_Stress_Event {
+	sizes := [?]int{32, 48, 64, 127, 256, 511, 1024, 2048, 4096, 1, 17, 33}
+	events := make([dynamic]Ring_Stress_Event, 0, target_blocks * 2)
+	position := u64(0)
+	segment := u64(0)
+	block_count := 0
+	iteration := 0
+	for block_count < target_blocks {
+		if iteration % 53 == 52 {
+			skip := u64(1 + (iteration * 37) % 300)
+			segment += 1
+			append(&events, Ring_Stress_Event{
+				kind = .Gap,
+				start_frame = position,
+				frames = skip,
+				segment = segment,
+			})
+			position += skip
+		}
+		frames := sizes[(iteration * 7) % len(sizes)]
+		append(&events, Ring_Stress_Event{
+			kind = .Block,
+			start_frame = position,
+			frames = u64(frames),
+			segment = segment,
+		})
+		position += u64(frames)
+		block_count += 1
+		iteration += 1
+	}
+	return events
+}
+
+@(test)
+test_ring_spsc_variable_blocks_and_discontinuities :: proc(t: ^testing.T) {
+	target_blocks := stress_count("CARNIVAL_STRESS_RING_BLOCKS", 100000)
+	events := ring_stress_build_events(target_blocks)
+	defer delete(events)
+
+	expected_gaps := 0
+	for event in events {
+		if event.kind == .Gap {
+			expected_gaps += 1
+		}
+	}
+
+	ring: Audio_Ring
+	testing.expect(t, audio_ring_init(&ring, 8, 4096, 2, 0, 5), "init")
+	defer audio_ring_destroy(&ring)
+
+	producer_ctx := Ring_Stress_Producer{
+		ring = &ring,
+		events = events[:],
+		channels = 2,
+		buffer = make([]f32, 4096 * 2),
+	}
+	defer delete(producer_ctx.buffer)
+	consumer_ctx := Ring_Stress_Consumer{
+		ring = &ring,
+		events = events[:],
+		done = &producer_ctx.done,
+		channels = 2,
+		buffer = make([]f32, 4096 * 2),
+	}
+	defer delete(consumer_ctx.buffer)
+
+	consumer_thread := thread.create_and_start_with_data(&consumer_ctx, ring_stress_consumer_thread)
+	testing.expect(t, consumer_thread != nil, "consumer thread started")
+	producer_ctx.done = 0
+	producer_thread := thread.create_and_start_with_data(&producer_ctx, ring_stress_producer_thread)
+	testing.expect(t, producer_thread != nil, "producer thread started")
+
+	thread.join(producer_thread)
+	thread.destroy(producer_thread)
+	thread.join(consumer_thread)
+	thread.destroy(consumer_thread)
+
+	testing.expect_value(t, producer_ctx.unexpected, 0)
+	testing.expect_value(t, consumer_ctx.missing, 0)
+	testing.expect_value(t, consumer_ctx.mismatches, 0)
+	testing.expect_value(t, consumer_ctx.blocks, target_blocks)
+	testing.expect_value(t, consumer_ctx.gaps, expected_gaps)
+	testing.expect_value(t, audio_ring_gaps_recorded(&ring), u64(expected_gaps))
+	testing.expect_value(t, audio_ring_gaps_pending(&ring), u64(0))
+	testing.expect_value(t, audio_ring_depth(&ring), u64(0))
+	testing.expect_value(t, audio_ring_duplicate_blocks(&ring), u64(0))
+	testing.expect_value(t, audio_ring_dropped_blocks(&ring), u64(0))
+	testing.expect(t, !audio_ring_overrun_seen(&ring), "no overrun")
+	testing.expect(t, !audio_ring_ledger_overflow_seen(&ring), "ledger did not overflow")
+	fmt.printf("ring stress: %d blocks, %d gaps, %d frames\n",
+		consumer_ctx.blocks, consumer_ctx.gaps, audio_ring_source_frame_pos(&ring))
 }
 
 @(test)
