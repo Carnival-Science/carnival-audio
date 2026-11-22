@@ -95,6 +95,23 @@ Backend_VTable :: struct {
 	stop:      proc(data: rawptr),
 	reset:     proc(data: rawptr),
 	process:   proc(data: rawptr, request: ^Process_Request) -> Process_Result,
+	// telemetry is optional. When present, the adapter exposes the draft
+	// Carnival telemetry-capture extension and forwards its calls here. All
+	// vtable calls arrive on the host main thread; the drain sink callback runs
+	// synchronously on that thread.
+	telemetry: ^Telemetry_Ops,
+}
+
+// Telemetry_Ops is the product side of the draft Carnival telemetry extension
+// (clap.CARNIVAL_EXT_TELEMETRY_CAPTURE_DRAFT). Every proc may be called from the
+// host main thread only. drain delivers records through a host callback; the
+// record pointer is valid only for the duration of that call.
+Telemetry_Ops :: struct {
+	set_enabled:    proc(data: rawptr, enabled: bool) -> bool,
+	drain:          proc(data: rawptr, sink: clap.Carnival_Capture_Sink, max_records: u32) -> u32,
+	dropped:        proc(data: rawptr) -> u64,
+	valid:          proc(data: rawptr) -> bool,
+	schema_version: proc(data: rawptr) -> u32,
 }
 
 Definition :: struct {
@@ -107,6 +124,13 @@ Definition :: struct {
 	output_port_name: string,
 	state_magic:     [8]u8,
 	state_schema:    u32,
+	// Optional product authoring flags appended to state schema 3 and later.
+	// Schema 1/2 files carry no flag word; loading one leaves the product at
+	// its default flags. The save hook returns the current flags, the load hook
+	// applies a validated value. A definition that sets these hooks must use
+	// state_schema >= 3.
+	state_flags_save: proc(data: rawptr) -> u32,
+	state_flags_load: proc(data: rawptr, flags: u32),
 }
 
 // ---------------------------------------------------------------------------
@@ -130,6 +154,7 @@ Instance :: struct {
 	ext_state:       clap.Plugin_State,
 	ext_latency:     clap.Plugin_Latency,
 	ext_tail:        clap.Plugin_Tail,
+	ext_telemetry:   clap.Carnival_Telemetry_Capture,
 }
 
 // ---------------------------------------------------------------------------
@@ -215,6 +240,10 @@ factory_create_plugin :: proc "c" (factory: ^clap.Plugin_Factory, host: ^clap.Ho
 	if len(definition.params) > MAX_PARAMS {
 		return nil
 	}
+	if (definition.state_flags_save != nil || definition.state_flags_load != nil) &&
+		definition.state_schema < 3 {
+		return nil
+	}
 	if definition.backend == nil || definition.backend.create == nil || definition.backend.process == nil {
 		return nil
 	}
@@ -269,6 +298,15 @@ factory_create_plugin :: proc "c" (factory: ^clap.Plugin_Factory, host: ^clap.Ho
 	}
 	instance.ext_latency = clap.Plugin_Latency{get = latency_get}
 	instance.ext_tail = clap.Plugin_Tail{get = tail_get}
+	if definition.backend.telemetry != nil {
+		instance.ext_telemetry = clap.Carnival_Telemetry_Capture{
+			set_enabled = telemetry_set_enabled,
+			drain = telemetry_drain,
+			dropped = telemetry_dropped,
+			valid = telemetry_valid,
+			schema_version = telemetry_schema_version,
+		}
+	}
 	return &instance.plugin
 }
 
@@ -751,18 +789,24 @@ write_c_string :: proc "c" (buffer: [^]u8, capacity: u32, text: string) {
 // ---------------------------------------------------------------------------
 // State extension
 //
-// State is authoring state only: stable parameter IDs and values. Processing
-// state (windows, accumulators, clocks) is never serialized. The format is:
+// State is authoring state only: stable parameter IDs and values, plus an
+// optional product flag word. Processing state (windows, accumulators, clocks)
+// is never serialized. The format is:
 //
 //   magic[8] | u32 schema | u32 param_count | param_count * (u32 id, f64 value)
+//            [| u32 product_flags]        (schema 3+ with a flags hook)
 //
 // Schema 1 contained parameters 1001..1003. Schema 2 adds 1004; loading a v1
-// fixture leaves 1004 at its descriptor default. All fields are native-endian
-// (the supported targets are little-endian); no cross-endian claim is made.
+// fixture leaves 1004 at its descriptor default. Schema 3 appends a product
+// flag word (Pulse uses bit 0 for telemetry capture mode); loading a v1/v2
+// fixture leaves the flags at the product default. All fields are
+// native-endian (the supported targets are little-endian); no cross-endian
+// claim is made.
 // ---------------------------------------------------------------------------
 
 @(private)
 state_save :: proc "c" (plugin: ^clap.Plugin, stream: ^clap.OStream) -> bool {
+	context = runtime.default_context()
 	instance := instance_of(plugin)
 	if instance == nil || stream == nil || stream.write == nil {
 		return false
@@ -787,11 +831,16 @@ state_save :: proc "c" (plugin: ^clap.Plugin, stream: ^clap.OStream) -> bool {
 		put_f64(buffer[:], offset, transmute(f64)bits)
 		offset += 8
 	}
+	if definition.state_flags_save != nil {
+		put_u32(buffer[:], offset, definition.state_flags_save(instance.data))
+		offset += 4
+	}
 	return write_all(stream, buffer[:offset])
 }
 
 @(private)
 state_load :: proc "c" (plugin: ^clap.Plugin, stream: ^clap.IStream) -> bool {
+	context = runtime.default_context()
 	instance := instance_of(plugin)
 	if instance == nil || stream == nil || stream.read == nil {
 		return false
@@ -830,9 +879,20 @@ state_load :: proc "c" (plugin: ^clap.Plugin, stream: ^clap.IStream) -> bool {
 		}
 		values[index] = clamp_param(definition.params[index], value)
 	}
+	flags: u32
+	if definition.state_flags_save != nil && schema >= 3 {
+		flag_bytes: [4]u8
+		if !read_all(stream, flag_bytes[:]) {
+			return false
+		}
+		flags = get_u32(flag_bytes[:], 0)
+	}
 	// Commit only after the whole stream has been validated.
 	for _, index in definition.params {
 		sync.atomic_store_explicit(&instance.param_values[index], transmute(u64)values[index], .Release)
+	}
+	if definition.state_flags_load != nil {
+		definition.state_flags_load(instance.data, flags)
 	}
 	// CLAP state load is a main-thread authoring operation; tell the host that
 	// cached parameter values changed. Some hosts (and clap-validator) require
@@ -919,6 +979,90 @@ tail_get :: proc "c" (plugin: ^clap.Plugin) -> u32 {
 }
 
 // ---------------------------------------------------------------------------
+// Draft Carnival telemetry-capture extension (private, experimental)
+// ---------------------------------------------------------------------------
+
+// The draft extension is main-thread-only. When the host offers
+// clap.thread-check, enforce it; otherwise the host contract is documented but
+// not observable.
+@(private)
+telemetry_on_main_thread :: proc(instance: ^Instance) -> bool {
+	if instance.host_info.thread_check != nil && instance.host_info.thread_check.is_main_thread != nil {
+		return instance.host_info.thread_check.is_main_thread(instance.host)
+	}
+	return true
+}
+
+@(private)
+telemetry_set_enabled :: proc "c" (plugin: ^clap.Plugin, enabled: bool) -> bool {
+	context = runtime.default_context()
+	instance := instance_of(plugin)
+	if instance == nil || instance.data == nil || instance.definition.backend.telemetry == nil {
+		return false
+	}
+	if !telemetry_on_main_thread(instance) {
+		return false
+	}
+	return instance.definition.backend.telemetry.set_enabled(instance.data, enabled)
+}
+
+@(private)
+telemetry_drain :: proc "c" (
+	plugin: ^clap.Plugin,
+	sink: clap.Carnival_Capture_Sink,
+	max_records: u32,
+) -> u32 {
+	context = runtime.default_context()
+	instance := instance_of(plugin)
+	if instance == nil || instance.data == nil || instance.definition.backend.telemetry == nil {
+		return 0
+	}
+	if !telemetry_on_main_thread(instance) {
+		return 0
+	}
+	return instance.definition.backend.telemetry.drain(instance.data, sink, max_records)
+}
+
+@(private)
+telemetry_dropped :: proc "c" (plugin: ^clap.Plugin) -> u64 {
+	context = runtime.default_context()
+	instance := instance_of(plugin)
+	if instance == nil || instance.data == nil || instance.definition.backend.telemetry == nil {
+		return 0
+	}
+	if !telemetry_on_main_thread(instance) {
+		return 0
+	}
+	return instance.definition.backend.telemetry.dropped(instance.data)
+}
+
+@(private)
+telemetry_valid :: proc "c" (plugin: ^clap.Plugin) -> bool {
+	context = runtime.default_context()
+	instance := instance_of(plugin)
+	if instance == nil || instance.data == nil || instance.definition.backend.telemetry == nil {
+		return false
+	}
+	if !telemetry_on_main_thread(instance) {
+		return false
+	}
+	return instance.definition.backend.telemetry.valid(instance.data)
+}
+
+@(private)
+telemetry_schema_version :: proc "c" (plugin: ^clap.Plugin) -> u32 {
+	context = runtime.default_context()
+	instance := instance_of(plugin)
+	if instance == nil || instance.data == nil || instance.definition.backend.telemetry == nil {
+		return 0
+	}
+	if !telemetry_on_main_thread(instance) {
+		return 0
+	}
+	return instance.definition.backend.telemetry.schema_version(instance.data)
+}
+
+// ---------------------------------------------------------------------------
 // Extension dispatch
 // ---------------------------------------------------------------------------
 
@@ -935,6 +1079,11 @@ plugin_get_extension :: proc "c" (plugin: ^clap.Plugin, id: cstring) -> rawptr {
 	case clap.CLAP_EXT_STATE:       return &instance.ext_state
 	case clap.CLAP_EXT_LATENCY:     return &instance.ext_latency
 	case clap.CLAP_EXT_TAIL:        return &instance.ext_tail
+	case clap.CARNIVAL_EXT_TELEMETRY_CAPTURE_DRAFT:
+		if instance.definition.backend.telemetry == nil {
+			return nil
+		}
+		return &instance.ext_telemetry
 	}
 	return nil
 }

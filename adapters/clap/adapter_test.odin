@@ -25,10 +25,18 @@ Test_Data :: struct {
 	reset_calls:  int,
 	start_calls:  int,
 	stop_calls:   int,
+	capture_enabled: bool,
+	capture_dropped: u64,
+	capture_valid:   bool,
+	capture_records: [2]clap.Carnival_Measurement_Record,
+	capture_count:   u32,
+	capture_read:    u32,
 }
 
 test_create :: proc() -> rawptr {
-	return new(Test_Data)
+	data := new(Test_Data)
+	data.capture_valid = true
+	return data
 }
 
 test_destroy :: proc(data: rawptr) {
@@ -90,6 +98,79 @@ test_backend: Backend_VTable = {
 	stop = test_stop,
 	reset = test_reset,
 	process = test_process,
+	telemetry = &test_telemetry,
+}
+
+// Adapter-level telemetry: a minimal backend implementation used to prove the
+// adapter's draft-extension forwarding and the host sink callback.
+test_telemetry_set_enabled :: proc(data: rawptr, enabled: bool) -> bool {
+	instance := cast(^Test_Data)data
+	instance.capture_enabled = enabled
+	instance.capture_dropped = 0
+	instance.capture_valid = true
+	instance.capture_count = enabled ? 2 : 0
+	instance.capture_read = 0
+	if enabled {
+		for index in 0 ..< 2 {
+			instance.capture_records[index] = clap.Carnival_Measurement_Record{
+				schema_version = clap.CARNIVAL_MEASUREMENT_SCHEMA_VERSION,
+				generation = u64(index + 1),
+				start_frame = i64(index) * 1024,
+				frames = 1024,
+				channels = 2,
+				sample_rate = 48000,
+				valid = true,
+				capture_valid = true,
+			}
+		}
+	}
+	return true
+}
+
+test_telemetry_drain :: proc(
+	data: rawptr,
+	sink: clap.Carnival_Capture_Sink,
+	max_records: u32,
+) -> u32 {
+	instance := cast(^Test_Data)data
+	if sink.push == nil {
+		return 0
+	}
+	limit := instance.capture_count
+	if max_records != 0 {
+		limit = min(limit, max_records)
+	}
+	delivered: u32 = 0
+	for delivered < limit {
+		if !sink.push(sink.ctx, &instance.capture_records[instance.capture_read + delivered]) {
+			break
+		}
+		delivered += 1
+	}
+	instance.capture_read += delivered
+	instance.capture_count -= delivered
+	return delivered
+}
+
+test_telemetry_dropped :: proc(data: rawptr) -> u64 {
+	return (cast(^Test_Data)data).capture_dropped
+}
+
+test_telemetry_valid :: proc(data: rawptr) -> bool {
+	return (cast(^Test_Data)data).capture_valid
+}
+
+test_telemetry_schema_version :: proc(data: rawptr) -> u32 {
+	_ = data
+	return clap.CARNIVAL_MEASUREMENT_SCHEMA_VERSION
+}
+
+test_telemetry: Telemetry_Ops = {
+	set_enabled = test_telemetry_set_enabled,
+	drain = test_telemetry_drain,
+	dropped = test_telemetry_dropped,
+	valid = test_telemetry_valid,
+	schema_version = test_telemetry_schema_version,
 }
 
 test_params: [2]Param_Descriptor = {
@@ -146,6 +227,21 @@ Test_Host :: struct {
 	restart_calls:     int,
 	callback_calls:    int,
 	process_calls:     int,
+}
+
+Adapter_Capture :: struct {
+	records: [4]clap.Carnival_Measurement_Record,
+	count:   int,
+}
+
+adapter_capture_push :: proc "c" (ctx: rawptr, record: ^clap.Carnival_Measurement_Record) -> bool {
+	collector := cast(^Adapter_Capture)ctx
+	if collector == nil || record == nil || collector.count >= len(collector.records) {
+		return false
+	}
+	collector.records[collector.count] = record^
+	collector.count += 1
+	return true
 }
 
 test_host_get_extension :: proc "c" (host: ^clap.Host, extension_id: cstring) -> rawptr {
@@ -324,6 +420,50 @@ set_param :: proc(plugin: ^clap.Plugin, id: u32, value: f64) -> bool {
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
+
+@(test)
+test_draft_telemetry_extension_forwarding :: proc(t: ^testing.T) {
+	plugin, harness := instantiate(t)
+	defer destroy_instance(plugin, harness)
+	testing.expect(t, plugin.init(plugin), "init")
+
+	extension := cast(^clap.Carnival_Telemetry_Capture)plugin.get_extension(
+		plugin, cstring(clap.CARNIVAL_EXT_TELEMETRY_CAPTURE_DRAFT))
+	testing.expect(t, extension != nil, "draft telemetry extension exposed")
+	if extension == nil {
+		return
+	}
+	testing.expect_value(t, extension.schema_version(plugin), clap.CARNIVAL_MEASUREMENT_SCHEMA_VERSION)
+	testing.expect(t, extension.valid(plugin), "capture valid before enable")
+	testing.expect_value(t, extension.dropped(plugin), u64(0))
+	testing.expect(t, extension.set_enabled(plugin, true), "enable forwarded")
+	testing.expect(t, (cast(^Test_Data)instance_of(plugin).data).capture_enabled,
+		"backend observed enable")
+
+	collector: Adapter_Capture
+	sink := clap.Carnival_Capture_Sink{ctx = &collector, push = adapter_capture_push}
+	testing.expect_value(t, extension.drain(plugin, sink, 1), u32(1))
+	testing.expect_value(t, collector.count, 1)
+	testing.expect_value(t, collector.records[0].generation, u64(1))
+	testing.expect_value(t, collector.records[0].schema_version, clap.CARNIVAL_MEASUREMENT_SCHEMA_VERSION)
+	// max_records == 0 drains the remainder.
+	testing.expect_value(t, extension.drain(plugin, sink, 0), u32(1))
+	testing.expect_value(t, collector.count, 2)
+	testing.expect_value(t, collector.records[1].generation, u64(2))
+	testing.expect_value(t, extension.drain(plugin, sink, 0), u32(0))
+
+	// Forced backend loss is visible through the adapter without touching audio.
+	data := cast(^Test_Data)instance_of(plugin).data
+	data.capture_dropped = 3
+	data.capture_valid = false
+	testing.expect_value(t, extension.dropped(plugin), u64(3))
+	testing.expect(t, !extension.valid(plugin), "capture invalid forwarded")
+
+	testing.expect(t, extension.set_enabled(plugin, false), "disable forwarded")
+	testing.expect(t, !(cast(^Test_Data)instance_of(plugin).data).capture_enabled, "backend observed disable")
+	testing.expect(t, extension.valid(plugin), "disable resets capture validity")
+	testing.expect_value(t, extension.dropped(plugin), u64(0))
+}
 
 @(test)
 test_lifecycle_and_thread_state_rules :: proc(t: ^testing.T) {
