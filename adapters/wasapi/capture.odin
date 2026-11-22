@@ -247,6 +247,9 @@ session_open :: proc(
 		return false
 	}
 	if !backend.open(backend.ctx, &session.ring, config, &session.info) {
+		// The backend may have initialized a context before failing (for
+		// example a platform without loopback support). Let it release.
+		backend.close(backend.ctx)
 		ring_destroy(&session.ring, allocator)
 		return false
 	}
