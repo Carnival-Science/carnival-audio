@@ -97,6 +97,8 @@ A dynamic CLAP 1.2.10 host, independent of `adapters/clap` and every product:
 - host extensions: audio-ports, params (rescan counter), state (memory
   streams), latency, tail, thread-check;
 - query and drain the draft Carnival telemetry extension;
+- query the draft processing-checkpoint capability (`supported`) and save/load a
+  checkpoint through memory streams;
 - authoring-state save/load through memory streams.
 
 Thread discipline is observable: the host records its main thread, marks the
@@ -122,12 +124,13 @@ failure and the runner preserves stdout/stderr and any artifacts.
 | `repeatability` | two fresh instances in-process produce byte-identical output and records | fresh instance |
 | `partition` | same absolute input/static parameters across 64/128/256/512/997/irregular schedules produce byte-identical output and records; a difference is a specimen failure | strict static invariance |
 | `automation` | sample-timestamped events under different partitions; labels the observed class instead of collapsing it into pass/fail | control-rate / observed class |
-| `state` | authoring save/load, schema-1/2/3 fixture migration (parameter values + capture default), render equality with a current-schema equivalent, continuous prefix/suffix state restore | authoring + processing state |
+| `state` | authoring save/load and schema-1/2/3 fixture migration (parameter values + capture default); render equality with a current-schema parameter equivalent. It does **not** require output continuation after a restore | authoring state + migration |
+| `checkpoint` | optional: skips unless `supported()` is true, then a prefix checkpoint restored into a fresh instance must continue the suffix bit-exactly | processing checkpoint |
 | `isolation` | two instances with different parameters, interleaved, match solo runs | instance isolation |
 | `reset` | reset then reprocess equals a fresh instance at the same partition | clean-state semantics |
 | `tail` | post-input silence length above a documented threshold, declared-tail comparison | boundedness observation |
 | `perturbation` | single-sample input delta propagation window | response observation |
-| `capture_toggle` | enable/disable episodes, zero records while disabled, re-enable starts fresh | capture lifecycle |
+| `capture_toggle` | enable/disable episodes (host stops processing around each switch), zero records while disabled, re-enable starts fresh | capture lifecycle |
 | `capture_overflow` | 4096-record bounded queue overflow: delivered/dropped counters and capture-domain invalidity, recovery on a new episode | capture lifecycle |
 | `gap` | host steady-clock skip: no window straddles the lost range, post-gap windows align and are audio-invalid, capture validity unaffected | discontinuity |
 
@@ -169,12 +172,13 @@ The census currently covers:
 - **Pulse** (`products/pulse`, preserved/current build): canonical measurement
   verification, state migration, capture lifecycle and gaps;
 - **good reference processors** (`products/reference/`): gain (stateless,
-  exact), biquad (per-sample direct form I), feedback delay (persistent state
-  plus schema-4 processing blob);
+  exact), biquad (per-sample direct form I), feedback delay (persistent state,
+  schema-3 authoring parameters plus a processing checkpoint);
 - **defective reference processors** used to test the tester:
   block-boundary-resetting smoother (must fail static partition invariance),
-  leaky delay (must fail state restoration), NaN trigger (must fail the
-  non-finite probe);
+  leaky delay (authoring state must pass; its processing checkpoint claims
+  support but omits the delay line, so the checkpoint probe must fail), NaN
+  trigger (must fail the non-finite probe);
 - **small third-party census**: `baconpaul/clap-c99-distortion` (MIT), a pure C99
   stereo distortion. It observes a different, legitimate automation class:
   sample-offset event application is partition-invariant, unlike the Carnival
@@ -192,3 +196,17 @@ unchanged audio output, are tested.
 Milestone 2 (A−1 slice) implemented; see the dated reports. Still open:
 cross-platform evidence, a larger pinned third-party corpus, performance
 profiling on named hardware, and CI execution when billing is restored.
+
+## Remaining work specific to measurement verification
+
+- **Spectrum is not end-to-end yet (F3).** The `spectrum` probe currently
+  validates the laboratory's independent naive DFT against the *generated
+  input*. It does not compare against spectral measurements emitted by Pulse,
+  because Pulse exports no spectrum data. The full comparison becomes possible
+  when the Studio analyzer exposes spectrum data (M3.2). No pass in this probe
+  is evidence about Pulse's FFT.
+- **Migration tests should compare measurement records (F3).** The `state`
+  fixture path currently compares rendered passthrough audio. For a measurement
+  product the stronger assertion is canonical-record equality after a
+  migration; this is wired as a follow-up once the fixture render path compares
+  `records.csv` rather than `output.wav`.

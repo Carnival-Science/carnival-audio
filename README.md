@@ -15,8 +15,8 @@ application will live at `products/pulse`.
 - **Alicorn** (separate repository): UI, rendering, accessibility, native host
   integration. No audio, DSP, or plugin-hosting code ever.
 - **carnival-audio** (this repository): the audio analysis core
-  (`core/stream`, `core/dsp`, `core/transport`), verification
-  (`verification/`), and later the CLAP/WASAPI adapters and the Pulse product.
+  (`core/stream`, `core/dsp`, `core/transport`, `core/meter`), verification
+  (`verification/`), and the CLAP/WASAPI adapters and the Pulse products.
 - **Verification** (`verification/`): independent headless verification of
   measurement records, partitions, automation classes, state migration,
   isolation, tails and perturbations. It depends on core record formats only
@@ -26,14 +26,14 @@ application will live at `products/pulse`.
 ## Module map and dependency direction
 
 ```
-products/       products/pulse (M1) + products/reference fixtures (M2);
-                standalone meter + embedded editor later
+products/       products/pulse (CLAP) + products/pulse-mini (standalone)
+                + products/reference fixtures
     |
     v
-adapters/       adapters/clap (M1), adapters/wasapi (M3)
+adapters/       adapters/clap, adapters/wasapi
     |
     v
-core/           stream | dsp | transport            <- the stable center
+core/           stream | dsp | transport | meter          <- the stable center
 
 verification/   independent CLAP host + worker + probes; record formats and
                 third_party/clap ABI only, independent numerical references
@@ -42,7 +42,8 @@ research/       (future) isolated execution research
 
 Imports point only toward the core: products may import adapters and core;
 adapters may import core; core imports only Odin `core:` packages and its
-sibling core packages. `verification/` sits beside the chain — it may read core
+sibling core packages. Only `adapters/wasapi` may import `vendor:miniaudio`.
+`verification/` sits beside the chain — it may read core
 record formats, but it never imports the DSP implementation, adapters or
 products, so it cannot validate Pulse with Pulse's own math.
 
@@ -51,9 +52,13 @@ products, so it cannot validate Pulse with Pulse's own math.
 | `core/stream` | `stream` | Stream descriptor, sample clock, WAV replay, generated signals | implemented (M0) |
 | `core/dsp` | `dsp` | Sample peak, windowed RMS, peak hold, FFT, correlation | implemented (M0) |
 | `core/transport` | `transport` | Bounded SPSC block ring, revisioned snapshots | implemented (M0) |
-| `third_party/clap` | `clap` | Pinned CLAP 1.2.10 ABI declarations + vendored headers | implemented (M1) |
-| `adapters/clap` | `clap_adapter` | Generic CLAP lifecycle, params, state extensions | implemented (M1) |
-| `products/pulse` | `pulse` | Pulse headless CLAP meter backend | implemented (M1) |
+| `core/meter` | `meter` | Source-independent meter engine (analysis, epochs, records, snapshots) | implemented (M3.0) |
+| `third_party/clap` | `clap` | Pinned CLAP 1.2.10 ABI declarations + vendored headers + draft extensions | implemented (M1/M3) |
+| `third_party/miniaudio` | — | Vendored miniaudio 0.11.26 single header (public domain) | vendored (M3.1) |
+| `adapters/clap` | `clap_adapter` | Generic CLAP lifecycle, params, authoring state, draft extensions | implemented (M1/M3) |
+| `adapters/wasapi` | `wasapi` | Shared-mode WASAPI loopback capture, ring, recovery | implemented (M3.1) |
+| `products/pulse` | `pulse` | Pulse headless CLAP meter binding | implemented (M1/M3.0) |
+| `products/pulse-mini` | `main` | Standalone Mini meter (console, loopback) | implemented (M3.1) |
 | `tests` | `tests` | Integration tests: partitions, WAV round-trip, memory ceiling | implemented (M0) |
 | `products/reference` | per-plugin | Gain, biquad, delay + defective test fixtures | implemented (M2) |
 | `verification` | — | Independent A−1 host, worker, probes and census | implemented (M2) |
@@ -61,10 +66,10 @@ products, so it cannot validate Pulse with Pulse's own math.
 | `products` | `pulse` | Pulse meter (M1); standalone app and editor (M3) | headless CLAP meter implemented (M1) |
 | `research` | - | Isolated execution research | destination only |
 
-`adapters/clap`, `products/pulse`, `products/reference` and `verification/`
-exist through Milestone 2; `research/` and the standalone/editor products
-remain architectural destinations recorded in
-[docs/architecture.md](docs/architecture.md).
+`adapters/clap`, `adapters/wasapi`, `products/pulse`, `products/pulse-mini`,
+`products/reference` and `verification/` exist through Milestone 3;
+`research/` and the Alicorn standalone/editor UI remain architectural
+destinations recorded in [docs/architecture.md](docs/architecture.md).
 
 ## Documentation
 
@@ -74,6 +79,12 @@ remain architectural destinations recorded in
   conventions, tolerances, partition invariance.
 - [Headless CLAP meter](docs/clap-plugin.md) — build, ABI proof, lifecycle,
   params/state schema, measurement export, RT evidence and limits.
+- [Processing-checkpoint draft](docs/draft-processing-checkpoint.md) — the optional
+  processing-checkpoint capability, separate from authoring state.
+- [Pulse Mini](docs/pulse-mini.md) — standalone loopback capture, CLI, idle
+  policy, self-loop measurements and tolerance rationale.
+- [Telemetry draft](docs/draft-telemetry-extension.md) — canonical measurement
+  records through the real plugin binary.
 - [Milestone 1 validation](docs/benchmarks/clap-milestone1-validation-2026-11-22/README.md)
   — pinned clap-validator/clap-trap/clap-info results.
 - [Verification](verification/README.md) — A‑1 laboratory map, run command,
@@ -87,9 +98,16 @@ From the repository root:
 
 ```powershell
 .\tools\check-boundary.ps1    # core/, third_party/, adapters/, products/, verification/ boundaries
-.\tools\build.ps1             # odin check, out\pulse.clap, reference processors, worker
+.\tools\build.ps1             # odin check, out\pulse.clap, out\pulse-mini.exe, reference processors, worker
 .\tools\test.ps1              # boundary gate + C ABI probes + every package's tests
 .\tools\run_verification.ps1  # A-1 census: fresh workers, evidence under verification\reports\
+```
+
+After building, the standalone meter can be run directly:
+
+```powershell
+.\out\pulse-mini.exe --input=loopback --duration=5 --print-cadence=10
+.\out\pulse-mini.exe --input=loopback --duration=2 --self-loop
 ```
 
 ```sh
@@ -112,8 +130,11 @@ records is not yet claimed.
 - Milestone 2 (verification laboratory A‑1, #236): implemented
   (`verification/host`, `lab`, `worker`, scenarios, reference processors and a
   dated census). Evidence is local Windows x64; CI remains billing-blocked.
-- Milestone 3 (standalone Mini meter + embedded CLAP editor, #131): not
-  started.
+- Milestone 3 (standalone Mini meter + embedded CLAP editor, #131): M3.0 and
+  M3.1 implemented. `core/meter` is the shared analysis engine, `adapters/wasapi`
+  captures shared-mode loopback with explicit stall/recovery discontinuities,
+  and `products/pulse-mini` is a functional console meter (self-loop verified).
+  The Alicorn UI, hidden/idle work elision and the embedded editor are M3.2.
 
 ## License
 

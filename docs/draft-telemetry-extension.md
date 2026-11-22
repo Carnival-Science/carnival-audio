@@ -45,7 +45,7 @@ extension lookup itself uses the string id. `schema_version()` and the
 
 | Function | Semantics |
 | --- | --- |
-| `capture_set_enabled(plugin, enabled) -> bool` | Enable or disable canonical capture. Off by default. A successful call starts a fresh capture episode: pending records are discarded, the dropped counter is zeroed and capture validity is reset. |
+| `capture_set_enabled(plugin, enabled) -> bool` | Enable or disable canonical capture. Off by default. **Requires quiescent processing:** the host must have stopped processing (`clap.stop_processing`) — while processing is active the call returns false and changes nothing. A successful call starts a fresh capture episode: pending records are discarded, the dropped counter is zeroed and capture validity is reset. |
 | `capture_drain(plugin, sink, max_records) -> u32` | Deliver up to `max_records` pending records oldest-first through the host sink; `0` means "all pending". Returns the number delivered (stopped early if the sink returns false). |
 | `capture_dropped(plugin) -> u64` | Records discarded because the bounded queue was full, since the most recent enable (current or most recent capture episode). Zero while capture is disabled or was never enabled. |
 | `capture_valid(plugin) -> bool` | Capture-domain validity. True unless a record was dropped during the current episode. It never reflects lost audio samples. |
@@ -100,13 +100,22 @@ The two validity domains are deliberately independent:
   thread can therefore never overwrite the slot currently being read; it can
   only drop new records when the queue is full. This is a single-producer /
   single-consumer queue with the main thread as the only consumer.
-- **Enable/disable boundary.** `capture_set_enabled` clears the queue. Calling
-  it while processing is active is allowed, but a record may be lost at the
-  switch; callers that need an exact boundary should stop processing first. The
-  mode itself lives in the meter, not in the stream.
+- **Enable/disable boundary.** `capture_set_enabled` clears the queue, so it
+  requires quiescent processing: the adapter refuses the call while
+  `start_processing` is held, and the meter returns `Busy` without touching the
+  episode if called while active. Stop processing first. Live capture
+  switching while audio runs is deliberately not implemented; it needs a
+  concurrent publication handshake and its own tests, and is recorded as
+  remaining work.
 - **Authoring state.** Capture mode is persisted in `clap.state` schema 3 bit 0.
   Loading a schema 1/2 state leaves capture off. This makes the verification
-  mode survive a host save/load without exposing a public parameter.
+  mode survive a host save/load without exposing a public parameter. Loading a
+  state that changes capture mode while processing is active does not switch
+  the live episode; hosts load state while stopped.
+- **Not a checkpoint.** Capture mode is authoring state. Processing
+  checkpoints are a separate draft capability
+  (`com.carnival-science.processing-checkpoint.draft/1`); see
+  [draft-processing-checkpoint.md](draft-processing-checkpoint.md).
 - **No allocation, no locks.** Drain is a bounded copy/iteration over
   preallocated storage. The real-time process path never calls the sink.
 

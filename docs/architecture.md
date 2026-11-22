@@ -1,8 +1,8 @@
-# carnival-audio architecture (Milestone 0)
+# carnival-audio architecture (Milestone 0 + M3)
 
 `carnival-audio` is one repository with strict internal module boundaries. It
-holds a source-independent Odin audio core and two later edges: a standalone
-desktop meter and a native CLAP plugin. Alicorn supplies UI, rendering and
+holds a source-independent Odin audio core and two edges: a standalone capture
+meter and a native CLAP plugin. Alicorn supplies UI, rendering and
 accessibility at the standalone/editor edge only; it stays a separate
 repository.
 
@@ -16,13 +16,17 @@ first; extraction follows the criteria and table below.
 core/stream       stream descriptor, sample clock, WAV replay, generated signals
 core/dsp          sample peak, windowed RMS, peak hold, FFT, stereo correlation
 core/transport    bounded SPSC block ring, source-clock continuity, snapshots
+core/meter        source-independent meter engine: window/epoch analysis,
+                  capture-domain records, snapshot publication (two consumers)
 tests/            integration tests: partitions, WAV round-trip, memory ceiling
 verification/     A−1 laboratory: independent CLAP host, worker, probes, scenarios, reports
 third_party/clap  neutral CLAP 1.2.10 ABI declarations + vendored headers/C probes
-                  + private draft Carnival telemetry-capture extension
-adapters/clap     CLAP lifecycle/params/state adapter (M1; state schema 4 + tail hooks)
-adapters/         future adapters/wasapi capture (M3)
-products/pulse    Pulse headless CLAP meter (M1); standalone app/editor later
+                  + private draft Carnival telemetry and checkpoint extensions
+third_party/miniaudio  vendored single-file miniaudio 0.11.26 (public domain)
+adapters/clap     CLAP lifecycle/params/state adapter (M1; authoring schema 3)
+adapters/wasapi   shared-mode WASAPI loopback capture (M3.1)
+products/pulse    Pulse headless CLAP meter binding (M1/M3.0)
+products/pulse-mini  standalone Mini meter (M3.1)
 products/reference/  gain, biquad, delay + defective test-the-tester processors (M2)
 research/         (not created) isolated execution research
 ```
@@ -45,8 +49,9 @@ research/         isolated; no product or adapter imports
 - `core/` imports only Odin `core:` packages and its sibling core packages. It
   must never import `alicorn`, SDL3, miniaudio, WASAPI/ALSA/CoreAudio, CLAP,
   `third_party/`, `adapters/`, `products/` or `verification/`.
-- `adapters/` may import `core/` and `third_party/clap`. It is never imported by
-  `core/`.
+- `adapters/` may import `core/` and `third_party/clap`, and only
+  `adapters/wasapi` may import `vendor:miniaudio` (the capture backend). It is
+  never imported by `core/`.
 - `products/` may import `adapters/`, `core/` and `third_party/clap`;
   `products/pulse` is the only place that imports Alicorn.
 - `verification/` depends on core **record formats** only. It must never import
@@ -76,6 +81,30 @@ research/         isolated; no product or adapter imports
 `tools/check-boundary.ps1` enforces the `core/`, `verification/` and
 `third_party/` import boundaries. Tests import core packages directly.
 
+## The three reusable foundations
+
+1. **Sample and stream** (`core/stream`, `core/transport`) — the absolute frame
+   clock, bounded block transport, discontinuity ledger and revisioned
+   snapshots.
+2. **Measurement primitives** (`core/dsp`) — sample peak, windowed RMS,
+   peak hold, FFT, correlation.
+3. **Meter engine** (`core/meter`) — window/epoch analysis, audio-domain
+   validity, capture-domain records and queue, snapshot publication. It was
+   extracted from `products/pulse` in M3.0 and has two genuine consumers from
+   day one: the CLAP binding and the standalone capture meter.
+
+The engine's intake contract is deliberately source-independent:
+
+| Consumer | Entry point | Clock | Discontinuity |
+| --- | --- | --- | --- |
+| CLAP (`products/pulse`) | `engine_push_passthrough` with planar input/output | host `steady_time`; a forward jump is a source gap | recorded by the transport ring; new continuity segment |
+| Capture (`products/pulse-mini`) | `engine_push_interleaved` | delivered frames (`steady_time < 0` advances by the block) | `engine_note_discontinuity` on stall/recovery; no fabricated silence |
+
+Both accept variable-length blocks up to the activation maximum. Gaps never
+complete a window: the RMS window restarts at the post-gap absolute frame.
+`engine_note_discontinuity` also advances the analysis epoch; host steady-time
+gaps keep the existing epoch so Census labels and records stay unchanged.
+
 ## Architectural destinations
 
 These directories are destinations, not current structure. They are recorded
@@ -87,11 +116,12 @@ stability commitment the code has not earned.
 | `core/stream` (stream/replay) | stays `core/stream`; later DAW engine foundations |
 | `core/dsp` (peak/RMS, FFT, correlation) | stays `core/dsp`; later shared DSP library |
 | `core/transport` (ring, snapshots) | stays `core/transport`; later DAW engine foundations |
-| audio-verification content (A−1) | `verification/` |
-| WASAPI capture (Milestone 3) | `adapters/wasapi` |
+| `core/meter` (analysis engine) | stays `core/meter`; shared analysis engine for CLAP and capture (two consumers already) |
+| audio-verification content (A-1) | `verification/` |
+| WASAPI capture (Milestone 3) | `adapters/wasapi` (implemented M3.1) |
 | CLAP bindings and headless plugin (Milestone 1) | `adapters/clap` |
 | Neutral CLAP ABI declarations (Milestone 1) | `third_party/clap` |
-| standalone meter and embedded editor (Milestone 3) | `products/pulse` |
+| standalone meter and embedded editor (Milestone 3) | `products/pulse-mini` (implemented M3.1); `products/pulse` UI/editor later |
 | semantic state (future) | shared plugin/project serialization, then `products/` / `adapters/` consumers |
 | render capsules (future) | reproducibility / incremental rendering |
 
@@ -115,17 +145,40 @@ only with **at least two genuine consumers**, a **reasonably stable interface**,
 ## Data flow
 
 ```
-Audio_Source (WAV replay, generated fixture, later capture/plugin)
-    -> bounded Audio_Block stream on an absolute sample clock (epoch, frame)
+Audio_Source (WAV replay, generated fixture, CLAP host, WASAPI loopback)
+    -> bounded blocks on an explicit source clock (epoch, absolute frame)
+    -> core/meter engine intake (planar passthrough or interleaved capture)
     -> preallocated transport ring
     -> pure analysis accumulators (no allocation, no I/O, no locks)
     -> Measurement_Snapshot (revisioned, copied by value)
-    -> presentation (Alicorn UI, CLAP parameter/state export, verification lab)
+    -> presentation (Alicorn UI, console, CLAP parameter/state export,
+                    verification lab)
 ```
 
 Analysis never reads from a device or a GUI directly, and presentation never
 reads mutable analyser state. A dropped audio block produces an explicit
 invalid/overrun state; it must not be displayed as a valid quiet reading.
+
+### Capture intake (M3.1)
+
+`adapters/wasapi` opens shared-mode loopback on the default render endpoint and
+the data callback writes whole frames into a preallocated SPSC ring. A polling
+session (`session_poll`) is the only consumer. Two facts about loopback drive
+the design:
+
+- **A silent endpoint delivers no callbacks.** The session does not fabricate
+  silence and does not advance the source clock. After a documented idle
+  threshold it reports one explicit stall/discontinuity; when data resumes it
+  reports the broken timeline once. The consumer starts a new analysis epoch.
+- **The endpoint can be switched or removed.** A `stopped`/`rerouted`
+  notification marks the device lost; the session clears the ring, reopens,
+  and reports recovery with a new epoch. A failed reopen stays explicitly
+  unavailable and is retried, never shown as a valid quiet reading.
+
+Shared-mode loopback is not bit-transparent: endpoint mixing, format conversion
+and resampling are allowed. The contract is level accuracy, not bit equality;
+the self-loop test documents the measured deviation (about +0.001% on the
+development machine against a 1% tolerance).
 
 ### Transport continuity
 
@@ -175,32 +228,96 @@ as solved guarantees:
   SHA-256 of the exact validated artifact; bit-reproducible builds are remaining
   work.
 
-## State separation
+### Milestone 3 remaining work (founder review ledger)
 
-Three kinds of state are deliberately distinct:
+- **Spectrum end-to-end is not yet verified (F3).** The laboratory's
+  `spectrum` probe validates its own naive O(n²) DFT against the *generated
+  input*; it does **not** compare against spectral measurements emitted by
+  Pulse, because Pulse currently exports no spectrum data. The full
+  input→analysis→export comparison becomes possible when the Studio analyzer
+  exposes spectrum data (M3.2). Until then, the probe is a reference check on
+  the fixture, not an end-to-end spectral test.
+- **Migration tests compare passthrough audio, not measurement records (F3).**
+  The `state` fixtures currently render and compare `output.wav`; for a
+  measurement product the stronger assertion is record equality after a
+  migration. This needs a canonical-record comparison once a migrating
+  specimen exposes telemetry (Pulse does; the fixture render path should be
+  rewired to compare `records.csv`).
+- **Live capture switching is future work.** Capture episodes require
+  quiescent processing (F2). Switching capture while audio is running needs its
+  own concurrent publication tests and a documented lock-free handshake; the
+  current contract refuses the switch and says so.
+- **Vendored miniaudio is a provenance copy, not a local build.** The linked
+  implementation is the Odin distribution's build of the same 0.11.26 header;
+  `third_party/miniaudio/UPSTREAM.md` records the exact hash. A self-contained
+  C build step (MSVC/clang) is possible but not required by this milestone.
+- **Loopback level evidence is machine-local.** The self-loop test measures
+  about +0.001% peak/RMS deviation on the development machine against a 1%
+  tolerance. Shared-mode loopback is not bit-transparent; other endpoints,
+  sample-rate conversions and process mixes may differ.
+- **pulse-mini is console-only.** The Alicorn UI, hidden/idle work elision and
+  presentation profiling are M3.2. The engine is already snapshot-driven, so
+  presentation cadence cannot change analysis results.
+
+## State separation: four distinct contracts
 
 1. **Authoring state** — versioned settings, stable identifiers, user
-   preferences. Migratable; stored by the host or the standalone app.
-2. **Processing state** — sample clocks, epoch, windows, accumulators, hold
-   timers, overrun counters. Owned by the audio/analysis side; not a CLAP
+   preferences. Mandatory; reopens a project with the same configuration.
+   Migratable, stored by the host or the standalone app (`clap.state` schema 3
+   for Pulse and the reference processors). It does **not** promise that
+   processing continues from the same sample.
+2. **Processing checkpoint** — an **explicitly optional** capability that
+   resumes computation at an exact sample position: filter history, delay
+   lines, envelope timers. Exposed by the separate draft extension
+   `com.carnival-science.processing-checkpoint.draft/1`; a host must query
+   `supported()` first. A product may declare it unsupported without any
+   authoring-state defect.
+3. **Live processing state** — sample clocks, epoch, windows, accumulators,
+   hold timers, overrun counters. Owned by the audio/analysis side; not a CLAP
    preset and not reconstructed from presentation state.
-3. **Presentation state** — immutable revisioned snapshots and bounded
+4. **Presentation state** — immutable revisioned snapshots and bounded
    visualisation history. Latest-wins; may be dropped or coalesced freely.
 
-Milestone 0 implements processing state and the snapshot seam. Milestone 1 adds
-parameter authoring state (stable IDs, schema version 2, one v1→v2 migration)
-inside `adapters/clap`, while `products/pulse` keeps clocks, windows,
-accumulators, holds, validity latches and canonical records in processing state.
-Milestone 2 preparation adds schema 3 (one product flag word for capture mode)
-and separates audio-domain from capture-domain validity.
+The first two were conflated in the Milestone 2 preparation by a schema-4
+authoring blob that carried plugin-owned processing bytes. That blob was
+removed: authoring state is parameters-only again, and processing state moved
+to the checkpoint capability. The laboratory correspondingly tests authoring
+round-trip and migration separately from checkpoint continuation.
 
-Milestone 2 adds an optional schema-4 processing-state blob to the generic
-adapter for processors whose output must continue from saved state (the
-reference biquad history and feedback-delay line). The blob is plugin-owned
-bytes framed by a length; it is not a general DSP-state promise, and schemas
-1–3 load with a fresh processing state. Reference processors also use an
-optional `clap.tail` hook; Pulse still reports a zero tail and does not
-serialize processing state.
+Milestone 0 implements live processing state and the snapshot seam. Milestone 1
+adds parameter authoring state (stable IDs, schema version 2, one v1→v2
+migration) inside `adapters/clap`. Milestone 2 preparation adds schema 3 (one
+product flag word for capture mode), separates audio-domain from capture-domain
+validity, and introduces the telemetry draft. Milestone 3 adds the checkpoint
+draft and the capture intake.
+
+Per-product checkpoint support (recorded, not implied):
+
+| Product | Authoring schema | Checkpoint | Why |
+| --- | --- | --- | --- |
+| Pulse (`products/pulse`) | 3 | **unsupported** | its window/hold/clock pipeline is tied to an absolute source position; a partial resume would be misleading, and a stateless declaration is the honest choice |
+| Reference biquad | 3 | supported | eight f64 history words |
+| Reference delay | 3 | supported | delay line plus write cursor |
+| Reference leaky delay | 3 | claims supported, deliberately omits the line | negative fixture for the checkpoint capability; its authoring state passes |
+
+Reference processors also use an optional `clap.tail` hook; Pulse still reports
+a zero tail.
+
+### Draft checkpoint extension
+
+| Item | Value |
+| --- | --- |
+| Extension id | `com.carnival-science.processing-checkpoint.draft/1` |
+| Draft UUID | `5c2f0a7e-4b1d-4c8e-9f3a-7d6e2b1c0a95` |
+| Contract schema | `1` (`CARNIVAL_CHECKPOINT_SCHEMA_VERSION`) |
+| Vtable | `supported`, `save`, `load`, `schema_version` |
+| Thread | main thread only (enforced through `clap.thread-check` when offered) |
+
+The payload is plugin-owned: the plugin writes a magic, its own payload
+version and its fields through the normal CLAP streams, validates them before
+committing, and may leave its previous state untouched on failure. The draft
+frames nothing itself. See
+[draft-processing-checkpoint.md](draft-processing-checkpoint.md).
 
 ## Milestone 2 preparation
 
@@ -259,6 +376,43 @@ The census includes Pulse, three good reference processors
 fixtures (block-boundary smoother, leaky delay, NaN trigger), and one small
 pinned MIT third-party CLAP binary with provenance. See
 `verification/README.md` and `verification/reports/`.
+
+## Milestone 3: standalone engine and capture
+
+### M3.0 — meter engine extraction
+
+`core/meter` now owns the analysis engine that used to live in
+`products/pulse/meter.odin`: windowed peak/RMS/peak-hold, the absolute source
+clock and continuity semantics, audio-domain validity, the capture-domain
+record queue and snapshot publication. `products/pulse` is a thin binding:
+adapter parameter mapping, authoring schema 3, wire-record conversion for the
+telemetry extension, and lifecycle wiring.
+
+Regression gate: rerunning the M2 census after the extraction produced the same
+82 rows, the same classes and expectations, and the same Pulse `output.wav` /
+`records.csv` hashes as before. The engine tests pin partition invariance, an
+explicit discontinuity's epoch/window restart, the quiescent capture switch and
+zero allocation on the push/drain path.
+
+### M3.1 — WASAPI loopback and the Mini meter
+
+`adapters/wasapi` implements shared-mode loopback capture with a bounded ring
+and polling session (see the capture intake section above).
+`products/pulse-mini` wires capture → ring → engine → console snapshots and is
+built as `out/pulse-mini.exe`:
+
+```
+pulse-mini.exe --input=loopback [--duration=N] [--print-cadence=Hz]
+               [--window=FRAMES] [--self-loop]
+```
+
+The self-loop verification renders a known 400 Hz / 0.5 sine while capturing
+loopback, feeds the captured frames through the shared ring and engine, and
+checks the presentation snapshot: peak 0.500004 versus 0.5 (+0.001%), RMS
+0.353555 versus 1/(2√2) (+0.001%). The 1% tolerance is a level-accuracy
+contract for a shared-mode path that may mix, convert and resample; it is not a
+bit-equality claim. Device loss/recovery and idle stalls are covered by the
+fake-backend tests.
 
 ## Milestone 0 scope
 

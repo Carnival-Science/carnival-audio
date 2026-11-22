@@ -25,9 +25,10 @@ The plugin ID is `com.carnival-science.pulse.meter` (version `0.1.0`).
 
 | Layer | Role |
 | --- | --- |
-| `third_party/clap/abi` | Hand-written Odin declarations for CLAP 1.2.10 core + audio-ports/params/state/latency/thread-check/tail/render, plus the private draft Carnival telemetry-capture extension and its record schema |
-| `adapters/clap` | Lifecycle, factory, thread-state checks, parameter atomics/events, extension tables (including the draft telemetry vtable), versioned authoring state |
-| `products/pulse` | Meter backend, transport-ring analysis, canonical measurement capture, snapshot, product descriptor/params |
+| `third_party/clap/abi` | Hand-written Odin declarations for CLAP 1.2.10 core + audio-ports/params/state/latency/thread-check/tail/render, plus the private draft Carnival telemetry-capture and processing-checkpoint extensions and their payload contracts |
+| `core/meter` | Source-independent meter engine: window/epoch analysis, audio-domain validity, canonical record queue, snapshot publication |
+| `adapters/clap` | Lifecycle, factory, thread-state checks, parameter atomics/events, extension tables (telemetry and checkpoint vtables), versioned authoring state |
+| `products/pulse` | Thin CLAP binding: parameter mapping, wire-record conversion, authoring schema 3, telemetry wiring |
 
 `core/` never imports CLAP. The adapter does not import a product; the product
 registers its `Definition` with the adapter from the exported entry point.
@@ -83,14 +84,16 @@ hold timers, overrun latches and the canonical records are processing state and
 never appear in `clap.state`. The capture-mode flag is the one non-parameter
 authoring bit: it records whether the verification capture was enabled.
 
-The generic adapter also supports an optional **schema-4 processing-state
-blob**: a `u32` length followed by plugin-owned bytes, framed by the adapter
-after the flags word. It exists for processors whose output must continue from
-saved processing state (filter history, delay line). All three blob hooks must
-be set together and require schema 4; loading a schema 1–3 file leaves the
-processing state fresh. Pulse uses schema 3 and does not serialize processing
-state. The reference processors under `products/reference/` use schema 4 and
-also implement the optional `clap.tail` hook.
+The Milestone 2 preparation appended a schema-4 plugin-owned processing blob to
+this stream. That conflated authoring state with processing checkpoints and was
+removed in Milestone 3: authoring state stays schema 3 and a schema-4 file is
+rejected. Processing checkpoints are a separate, optional draft capability
+(`com.carnival-science.processing-checkpoint.draft/1`); see
+[draft-processing-checkpoint.md](draft-processing-checkpoint.md). Pulse
+declares it **unsupported** (its window/hold/clock state is tied to the absolute
+source timeline); the reference biquad/delay implement it, and `leaky_delay` is
+its negative fixture. The reference processors also implement the optional
+`clap.tail` hook.
 
 ## Processing and invalidation
 
@@ -107,7 +110,7 @@ also implement the optional `clap.tail` hook.
 3. The block is pushed into a bounded SPSC transport ring with its absolute
    start frame. The ring records gaps/overruns in its discontinuity ledger.
 4. The same callback drains the ring (unless a test disables draining) and
-   feeds `core/dsp` peak, RMS-window and peak-hold accumulators.
+   feeds the `core/meter` engine's peak, RMS-window and peak-hold analysis.
 5. Each complete RMS window updates live analysis. If capture is enabled, one
    `Measurement_Record` is appended to a preallocated SPSC queue. The latest
    `Measurement_Snapshot` is published through the existing seqlock regardless.
@@ -127,6 +130,12 @@ Validity is split into two independent domains:
   `capture_valid` becomes false. Live analysis, snapshots and the audio-domain
   validity are **not** affected. Draining does not repair capture validity; a
   new `capture_set_enabled` episode does.
+
+**Episode switching requires quiescent processing.** While `start_processing`
+is held, `capture_set_enabled` returns false at the adapter (and `Busy` at the
+meter) and changes nothing: the audio thread may be inside a publication and
+the episode reset clears the queue. Hosts stop processing, switch, and restart.
+Live capture switching is future work with its own concurrency tests.
 
 Dropped presentation frames (snapshots) are harmless: snapshots are
 latest-wins and never feed the canonical queue.

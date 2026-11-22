@@ -7,7 +7,7 @@
 
 | Path | Role |
 | --- | --- |
-| `host/` | independent CLAP host library: dynamic library load, factory/descriptors, instance lifecycle, variable blocks, parameter events, transport, state save/load, host extensions (audio-ports/params/state/latency/tail/thread-check), draft Carnival telemetry drain |
+| `host/` | independent CLAP host library: dynamic library load, factory/descriptors, instance lifecycle, variable blocks, parameter events, transport, authoring state save/load, host extensions (audio-ports/params/state/latency/tail/thread-check), draft Carnival telemetry drain and processing-checkpoint save/load |
 | `lab/` | verification-local numerical references (signal generator, peak/RMS, naive O(n²) DFT), WAV writer, hashing, scenario/evidence schemas, numeric fingerprint, probes |
 | `worker/` | one-process-per-run executable: scenario in, JSON evidence + WAV/CSV artifacts out, exit codes 0/1/2 |
 | `scenarios/` | deterministic scenario files for Pulse, the reference processors and the third-party specimen |
@@ -54,6 +54,11 @@ scope, with the explicit `third_party/clap` exception.
   block-start event application is a documented control-rate contract.
 - Tail and perturbation probes report measured windows and applicability, not
   convergence claims.
+- Authoring state and processing checkpoints are separate probes. `state`
+  judges parameter/migration contracts only; `checkpoint` first queries
+  `supported()` and skips when the capability is not claimed. An authoring
+  state that omits a delay line is never a defect by itself.
+- Capture episode switches require quiescent processing: stop, toggle, restart.
 - Deliberately defective specimens must fail exactly the probes they violate;
   the runner records expected specimen failures separately from laboratory
   failures.

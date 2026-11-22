@@ -41,6 +41,7 @@ here is extracted yet.
 | Module | Future destination |
 | --- | --- |
 | DSP primitives (`core/dsp`) | shared DSP library |
+| Meter engine (`core/meter`) | shared analysis engine (two consumers already: CLAP and capture) |
 | Stream and transport (`core/stream`, `core/transport`) | DAW engine foundations |
 | Semantic state (future) | shared plugin/project serialization |
 | CLAP adapter (`adapters/clap`, future) | reusable plugin-authoring infrastructure |
@@ -58,6 +59,9 @@ here is extracted yet.
     correlation.
   - `core/transport` (`transport`) — bounded SPSC block ring, revisioned
     measurement snapshots.
+  - `core/meter` (`meter`) — source-independent meter engine: windowed analysis,
+    source clock/epochs, capture-domain records and snapshot publication. Its
+    two consumers are the CLAP binding and the standalone capture meter.
 
   `core/` may import Odin `core:` packages and its sibling core packages only.
   It **must not import alicorn, SDL, miniaudio, WASAPI/ALSA/CoreAudio, CLAP,
@@ -73,23 +77,28 @@ here is extracted yet.
   `.\tools\run_verification.ps1` for the census. See `verification/AGENTS.md`.
 - `third_party/` — neutral protocol/ABI surface. `third_party/clap` holds the
   CLAP 1.2.10 foreign declarations, the vendored MIT header subset, the C
-  ABI proof probes, and one clearly marked private draft extension for
-  Carnival-internal telemetry capture (not a CLAP standard proposal). It may
-  import Odin `core:` packages and its own subpackages
-  only; it **must not import `core/`, `adapters/`, `products/`, `verification/`,
-  Alicorn or platform audio/UI libraries.** `adapters/`, `verification/` and
-  `products/` may import it. It is the future open-source extraction candidate,
-  but is extracted only after **both** a real plugin (`adapters/clap`) and an
+  ABI proof probes, and clearly marked private draft extensions for
+  Carnival-internal telemetry capture and processing checkpoints (not CLAP
+  standard proposals). `third_party/miniaudio` vendors the single-file
+  miniaudio 0.11.26 header (public domain) with provenance. `third_party/` may
+  import Odin `core:` packages and its own subpackages only; it **must not
+  import `core/`, `adapters/`, `products/`, `verification/`, Alicorn or platform
+  audio/UI libraries.** `adapters/`, `verification/` and `products/` may import
+  `third_party/clap`. It is the future open-source extraction candidate, but is
+  extracted only after **both** a real plugin (`adapters/clap`) and an
   independent host (`verification/`) exercise it.
 - `tests/` — integration tests (package `tests`) across the core packages.
 - `tools/` — build, test, ABI-probe and boundary harness.
 - `adapters/` — platform and host adapters. `adapters/clap` (Milestone 1)
-  implements the generic CLAP lifecycle/params/state adapter; `adapters/wasapi`
-  capture starts in Milestone 3. May import `core/` and `third_party/clap`; never
-  imported by core/ or products-owned code except through the documented
-  direction.
-- `products/` — `products/pulse` currently implements the headless CLAP meter
-  backend and entry point; the standalone application/editor (`#131`) follows.
+  implements the generic CLAP lifecycle/params/state adapter and the draft
+  telemetry/checkpoint forwarding; `adapters/wasapi` (Milestone 3.1) implements
+  shared-mode loopback capture, a bounded ring and explicit stall/recovery
+  discontinuities. May import `core/`, `third_party/clap` and (only
+  `adapters/wasapi`) `vendor:miniaudio`; never imported by core/ or
+  products-owned code except through the documented direction.
+- `products/` — `products/pulse` is the headless CLAP meter binding over
+  `core/meter`; `products/pulse-mini` (Milestone 3.1) is the standalone console
+  capture meter; the Alicorn UI/editor follows in M3.2.
   `products/reference/` holds gain, biquad and feedback-delay reference
   processors plus deliberately defective test-the-tester fixtures, built from
   the same adapter. `products/` may import `adapters/`, `core/` and
