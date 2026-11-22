@@ -627,6 +627,167 @@ test_snapshot_latest_wins_and_copies :: proc(t: ^testing.T) {
 	testing.expect(t, !snapshot_read(&publisher).valid, "reset reads invalid")
 }
 
+// Snapshot stress: one writer publishes continuously while four readers copy
+// concurrently. Every accepted snapshot must be internally consistent with its
+// generation (no torn mix), generations observed by a reader must be monotonic,
+// and every read must finish within the documented retry bound.
+Snapshot_Stress_Writer :: struct {
+	publisher:       ^Snapshot_Publisher,
+	publishes:       int,
+	done:            u64, // atomic
+	readers_ready:   u64, // atomic
+	expected_readers: u64,
+	generation_errors: int,
+}
+
+Snapshot_Stress_Reader :: struct {
+	publisher:       ^Snapshot_Publisher,
+	done:            ^u64,
+	readers_ready:   ^u64,
+	valid_reads:     u64,
+	invalid_reads:   u64,
+	torn:            u64,
+	nonmonotonic:    u64,
+	max_attempts:    int,
+	last_generation: u64,
+}
+
+// snapshot_stress_record derives every field from `generation`. A reader can
+// therefore detect any mixed-generation copy by recomputing it.
+snapshot_stress_record :: proc(generation: u64) -> Measurement_Snapshot {
+	return Measurement_Snapshot{
+		generation = generation,
+		valid = true,
+		overrun = generation % 7 == 0,
+		epoch = generation,
+		frame = i64(generation),
+		sample_rate = 48000,
+		channels = 2,
+		peak = {f32(generation % 1024), f32((generation * 3) % 1024)},
+		peak_frame = {i64(generation * 2), i64(generation * 2 + 1)},
+		peak_db = {f32(generation % 512), f32((generation * 5) % 512)},
+		rms = {f32(generation % 256), f32((generation * 7) % 256)},
+		rms_db = {f32(generation % 128), f32((generation * 11) % 128)},
+		hold = {f32(generation % 64), f32((generation * 13) % 64)},
+		hold_db = {f32(generation % 32), f32((generation * 17) % 32)},
+		correlation = f32(generation % 2000) - 1000,
+		correlation_valid = generation % 3 == 0,
+	}
+}
+
+snapshot_stress_matches :: proc(snapshot: Measurement_Snapshot, generation: u64) -> bool {
+	expected := snapshot_stress_record(generation)
+	return snapshot == expected
+}
+
+snapshot_stress_writer_thread :: proc(data: rawptr) {
+	ctx := cast(^Snapshot_Stress_Writer)data
+	for sync.atomic_load_explicit(&ctx.readers_ready, .Acquire) < ctx.expected_readers {
+		thread.yield()
+	}
+	for index in 0 ..< ctx.publishes {
+		generation := u64(index + 1) * 2
+		published := snapshot_publish(ctx.publisher, snapshot_stress_record(generation))
+		if published != generation {
+			ctx.generation_errors += 1
+		}
+	}
+	sync.atomic_store_explicit(&ctx.done, 1, .Release)
+}
+
+snapshot_stress_reader_thread :: proc(data: rawptr) {
+	ctx := cast(^Snapshot_Stress_Reader)data
+	sync.atomic_add_explicit(ctx.readers_ready, 1, .Release)
+	for sync.atomic_load_explicit(ctx.done, .Acquire) == 0 {
+		attempts := 0
+		snapshot := snapshot_read(ctx.publisher, &attempts)
+		ctx.max_attempts = max(ctx.max_attempts, attempts)
+		if !snapshot.valid {
+			ctx.invalid_reads += 1
+			continue
+		}
+		ctx.valid_reads += 1
+		generation := snapshot.generation
+		if generation & 1 != 0 {
+			ctx.torn += 1
+		}
+		if generation < ctx.last_generation {
+			ctx.nonmonotonic += 1
+		}
+		ctx.last_generation = generation
+		if !snapshot_stress_matches(snapshot, generation) {
+			ctx.torn += 1
+		}
+	}
+	// The final publication is stable: this read also guarantees each reader
+	// observes at least one complete value even if it started late.
+	attempts := 0
+	snapshot := snapshot_read(ctx.publisher, &attempts)
+	ctx.max_attempts = max(ctx.max_attempts, attempts)
+	if snapshot.valid {
+		ctx.valid_reads += 1
+		if snapshot.generation < ctx.last_generation {
+			ctx.nonmonotonic += 1
+		}
+		ctx.last_generation = snapshot.generation
+		if !snapshot_stress_matches(snapshot, snapshot.generation) {
+			ctx.torn += 1
+		}
+	} else {
+		ctx.invalid_reads += 1
+	}
+}
+
+@(test)
+test_snapshot_concurrent_publication_stress :: proc(t: ^testing.T) {
+	READERS :: 4
+	publishes := stress_count("CARNIVAL_STRESS_SNAPSHOT_PUBLISHES", 1000000)
+	publisher: Snapshot_Publisher
+	writer := Snapshot_Stress_Writer{
+		publisher = &publisher,
+		publishes = publishes,
+		expected_readers = READERS,
+	}
+	readers: [READERS]Snapshot_Stress_Reader
+	threads: [READERS]^thread.Thread
+	for index in 0 ..< READERS {
+		readers[index] = Snapshot_Stress_Reader{
+			publisher = &publisher,
+			done = &writer.done,
+			readers_ready = &writer.readers_ready,
+		}
+		threads[index] = thread.create_and_start_with_data(&readers[index], snapshot_stress_reader_thread)
+		testing.expect(t, threads[index] != nil, "reader thread started")
+	}
+
+	snapshot_stress_writer_thread(&writer)
+
+	total_valid := u64(0)
+	total_invalid := u64(0)
+	total_torn := u64(0)
+	total_nonmonotonic := u64(0)
+	max_attempts := 0
+	for index in 0 ..< READERS {
+		thread.join(threads[index])
+		thread.destroy(threads[index])
+		total_valid += readers[index].valid_reads
+		total_invalid += readers[index].invalid_reads
+		total_torn += readers[index].torn
+		total_nonmonotonic += readers[index].nonmonotonic
+		max_attempts = max(max_attempts, readers[index].max_attempts)
+		testing.expectf(t, readers[index].max_attempts <= SNAPSHOT_READ_RETRIES,
+			"reader %d exceeded the retry bound: %d", index, readers[index].max_attempts)
+	}
+
+	testing.expect_value(t, writer.generation_errors, 0)
+	testing.expect_value(t, total_torn, u64(0))
+	testing.expect_value(t, total_nonmonotonic, u64(0))
+	testing.expect(t, total_valid > 0, "readers observed complete snapshots")
+	testing.expect_value(t, snapshot_generation(&publisher), u64(publishes) * 2)
+	fmt.printf("snapshot stress: %d publications, %d readers, %d valid reads, %d invalid (retry-bound) reads, max attempts %d\n",
+		publishes, READERS, total_valid, total_invalid, max_attempts)
+}
+
 @(test)
 test_snapshot_fingerprint_repeatable :: proc(t: ^testing.T) {
 	snapshot := Measurement_Snapshot{
