@@ -54,6 +54,7 @@ function Get-PulsePackages {
         'core/stream',
         'core/dsp',
         'core/transport',
+        'core/meter',
         'tests'
     )
     # Optional layers exist only after their milestone commit. Keeping the
