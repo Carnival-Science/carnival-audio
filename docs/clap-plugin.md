@@ -25,9 +25,9 @@ The plugin ID is `com.carnival-science.pulse.meter` (version `0.1.0`).
 
 | Layer | Role |
 | --- | --- |
-| `third_party/clap/abi` | Hand-written Odin declarations for CLAP 1.2.10 core + audio-ports/params/state/latency/thread-check/tail/render |
-| `adapters/clap` | Lifecycle, factory, thread-state checks, parameter atomics/events, extension tables, versioned authoring state |
-| `products/pulse` | Meter backend, transport-ring analysis, canonical measurement queue and snapshot, product descriptor/params |
+| `third_party/clap/abi` | Hand-written Odin declarations for CLAP 1.2.10 core + audio-ports/params/state/latency/thread-check/tail/render, plus the private draft Carnival telemetry-capture extension and its record schema |
+| `adapters/clap` | Lifecycle, factory, thread-state checks, parameter atomics/events, extension tables (including the draft telemetry vtable), versioned authoring state |
+| `products/pulse` | Meter backend, transport-ring analysis, canonical measurement capture, snapshot, product descriptor/params |
 
 `core/` never imports CLAP. The adapter does not import a product; the product
 registers its `Definition` with the adapter from the exported entry point.
@@ -64,21 +64,24 @@ State format (native little-endian):
 
 ```
 " CSPULSE1"          8 bytes magic
-schema              u32 (current 2)
+schema              u32 (current 3)
 param_count         u32
 record[param_count] { id: u32, value: f64 }
+flags               u32 (schema 3+; bit 0 = capture mode enabled)
 ```
 
 Schema 1 stored 1001..1003. Schema 2 adds 1004; loading a v1 fixture leaves
-1004 at its descriptor default. The migration is covered by a hand-written v1
-byte fixture in `products/pulse/meter_test.odin`. Unknown IDs in a newer file
-are ignored; a bad magic, unsupported schema or truncated stream fails the load.
-The load commits only after the whole stream is parsed and then asks the host
-to rescan parameter values.
+1004 at its descriptor default. Schema 3 appends the product flag word; loading
+a v1/v2 file leaves the flags at zero, so telemetry capture is off. The
+migration is covered by hand-written fixtures in `products/pulse/meter_test.odin`.
+Unknown IDs in a newer file are ignored; a bad magic, unsupported schema or
+truncated stream fails the load. The load commits only after the whole stream
+is parsed and then asks the host to rescan parameter values.
 
 Only authoring state is serialized. Sample clock, epoch, windows, accumulators,
 hold timers, overrun latches and the canonical records are processing state and
-never appear in `clap.state`.
+never appear in `clap.state`. The capture-mode flag is the one non-parameter
+authoring bit: it records whether the verification capture was enabled.
 
 ## Processing and invalidation
 
@@ -92,28 +95,53 @@ never appear in `clap.state`.
    start frame. The ring records gaps/overruns in its discontinuity ledger.
 4. The same callback drains the ring (unless a test disables draining) and
    feeds `core/dsp` peak, RMS-window and peak-hold accumulators.
-5. Each complete RMS window emits one `Measurement_Record` into a preallocated
-   SPSC queue and the latest `Measurement_Snapshot` is published through the
-   existing seqlock.
+5. Each complete RMS window updates live analysis. If capture is enabled, one
+   `Measurement_Record` is appended to a preallocated SPSC queue. The latest
+   `Measurement_Snapshot` is published through the existing seqlock regardless.
 
-A source gap, ring overrun, ledger overflow or canonical-queue overflow latches
-`invalid`. Records and snapshots then carry `valid = false` / `overrun = true`
-until an explicit reset. Passthrough continues regardless. No dropped sample is
-ever silently treated as a valid quiet interval.
+Validity is split into two independent domains:
+
+- **Audio domain.** A source gap, ring overrun or ledger overflow latches
+  `audio_invalid`. Snapshots then carry `valid = false` / `overrun = true` and
+  emitted records carry `valid = false` until an explicit reset. Passthrough
+  continues. No dropped sample is ever silently treated as a valid quiet
+  interval.
+- **Capture domain.** Complete measurement capture is an explicitly enabled
+  verification mode, off by default. When it is off, records are **not
+  produced** (the cheapest correct behaviour), so the 4096-record queue is not a
+  lifecycle hazard and an ordinary session cannot saturate it. When capture is
+  on and the queue is full, the record is dropped, the dropped counter grows and
+  `capture_valid` becomes false. Live analysis, snapshots and the audio-domain
+  validity are **not** affected. Draining does not repair capture validity; a
+  new `capture_set_enabled` episode does.
+
+Dropped presentation frames (snapshots) are harmless: snapshots are
+latest-wins and never feed the canonical queue.
 
 ### Canonical export
 
 `meter_measurement_drain(meter, destination)` copies pending records oldest
-first; loop it for a complete drain at a quiescent boundary. Records are keyed
-by `epoch`, `start_frame` and `frames`, and carry per-channel peak/peak frame,
-RMS, hold and validity. Reading the presentation snapshot does not touch the
-record queue, so UI cadence cannot change canonical results. Forced queue
-saturation is observable via `meter_measurement_dropped`.
+first; loop it for a complete drain at a quiescent boundary.
+`meter_measurement_drain_sink(meter, sink, max_records)` is the zero-copy form
+used by the telemetry extension: the callback receives a pointer into the queue
+that is valid only for the call. Records are keyed by `epoch`, `start_frame` and
+`frames`, carry per-channel peak/peak frame, RMS, hold, the record schema
+version and both validity flags. Reading the presentation snapshot does not
+touch the record queue, so UI cadence cannot change canonical results. Forced
+queue saturation is observable via `meter_measurement_dropped`; capture-domain
+validity via `meter_capture_valid`.
+
+An independent host reaches the same queue through the draft Carnival telemetry
+extension; see
+[docs/draft-telemetry-extension.md](draft-telemetry-extension.md). It is a
+private experimental draft, not a CLAP standard proposal.
 
 The tests process the same 10,000-frame stream at 64/128/256/512/997-frame
 partitions and at two drain cadences, and require bit-identical records. They
 also compare sine/impulse/silence/noise measurements with closed-form literals at
-44.1/48/96 kHz and 64/128/512/irregular partitions.
+44.1/48/96 kHz and 64/128/512/irregular partitions. Capture-off saturation,
+capture-on overflow and extension-versus-backend record equality have their own
+tests.
 
 ## Real-time safety evidence
 
@@ -145,9 +173,13 @@ dump and the recorded fuzz gap.
 
 - Windows x64 only for release; Linux/macOS are compile+test gates.
 - Odin DLL builds are not byte-reproducible today (PE timestamps); the evidence
-  hash names the exact validated artifact, not a reproducible build.
+  hash names the exact validated artifact, not a reproducible build. The
+  Milestone 1 artifact is preserved under
+  `docs/benchmarks/clap-milestone1-validation-2026-11-22/artifacts/`.
 - Stereo only; no 64-bit audio, note ports, GUI, audio-ports-config or
   multi-instance sharing of allocation (each instance owns its buffers).
 - Cross-platform bit-identical measurement records are not established.
 - `state_load` treats a missing parameter as its default (the v1 migration
   rule); it does not preserve a parameter that a corrupt file omits.
+- The Carnival telemetry-capture extension and its record schema are a
+  **private experimental draft**, not a public standard; both may change.

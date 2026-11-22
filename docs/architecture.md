@@ -19,6 +19,7 @@ core/transport    bounded SPSC block ring, source-clock continuity, snapshots
 tests/            integration tests: partitions, WAV round-trip, memory ceiling
 verification/     A−1 verification laboratory; core record formats + neutral CLAP ABI, no implementation yet
 third_party/clap  neutral CLAP 1.2.10 ABI declarations + vendored headers/C probes
+                  + private draft Carnival telemetry-capture extension
 adapters/clap     CLAP lifecycle/params/state adapter (M1)
 adapters/         future adapters/wasapi capture (M3)
 products/pulse    Pulse headless CLAP meter (M1); standalone app/editor later
@@ -188,6 +189,31 @@ Milestone 0 implements processing state and the snapshot seam. Milestone 1 adds
 parameter authoring state (stable IDs, schema version 2, one v1→v2 migration)
 inside `adapters/clap`, while `products/pulse` keeps clocks, windows,
 accumulators, holds, validity latches and canonical records in processing state.
+Milestone 2 preparation adds schema 3 (one product flag word for capture mode)
+and separates audio-domain from capture-domain validity.
+
+## Milestone 2 preparation
+
+The M1 review found two issues, fixed without changing the audio contract:
+
+- **The measurement queue is no longer a lifecycle hazard.** Complete
+  measurement capture is an explicitly enabled verification mode (off by
+  default, toggled through the draft telemetry extension and recorded in
+  authoring-state schema 3). With capture off, records are not produced at all.
+  With capture on, queue overflow drops records and invalidates the **capture**
+  domain only; live analysis, snapshots and audio-domain validity are untouched.
+  Lost audio samples still invalidate the live analysis.
+- **A private draft CLAP extension exposes the canonical records.** The
+  `com.carnival-science.telemetry-capture.draft/1` extension (declared in
+  `third_party/clap`, implemented in `adapters/clap` + `products/pulse`) lets an
+  independent host enable capture, drain records through a synchronous callback,
+  and read the dropped counter, capture validity and schema version over the
+  real plugin binary. It is experimental and not a standard proposal; see
+  [draft-telemetry-extension.md](draft-telemetry-extension.md).
+
+The exact Milestone 1 validated plugin binary is preserved under
+`docs/benchmarks/clap-milestone1-validation-2026-11-22/artifacts/` because Odin
+DLL builds are not byte-reproducible.
 
 ## Milestone 0 scope
 

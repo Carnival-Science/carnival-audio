@@ -70,8 +70,10 @@ here is extracted yet.
   sharing the DSP that computes expected results is not. See
   `verification/AGENTS.md`.
 - `third_party/` — neutral protocol/ABI surface. `third_party/clap` holds the
-  CLAP 1.2.10 foreign declarations, the vendored MIT header subset and the C
-  ABI proof probes. It may import Odin `core:` packages and its own subpackages
+  CLAP 1.2.10 foreign declarations, the vendored MIT header subset, the C
+  ABI proof probes, and one clearly marked private draft extension for
+  Carnival-internal telemetry capture (not a CLAP standard proposal). It may
+  import Odin `core:` packages and its own subpackages
   only; it **must not import `core/`, `adapters/`, `products/`, `verification/`,
   Alicorn or platform audio/UI libraries.** `adapters/`, `verification/` and
   `products/` may import it. It is the future open-source extraction candidate,

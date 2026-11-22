@@ -90,6 +90,7 @@ pulse_backend: adapter.Backend_VTable = {
 	stop = pulse_backend_stop,
 	reset = pulse_backend_reset,
 	process = pulse_backend_process,
+	telemetry = &pulse_telemetry,
 }
 
 pulse_definition: adapter.Definition = {
@@ -102,6 +103,8 @@ pulse_definition: adapter.Definition = {
 	output_port_name = "Output",
 	state_magic = {'C', 'S', 'P', 'U', 'L', 'S', 'E', '1'},
 	state_schema = STATE_SCHEMA,
+	state_flags_save = pulse_state_flags_save,
+	state_flags_load = pulse_state_flags_load,
 }
 
 // ---------------------------------------------------------------------------
@@ -149,6 +152,62 @@ pulse_backend_reset :: proc(data: rawptr) {
 
 pulse_backend_process :: proc(data: rawptr, request: ^adapter.Process_Request) -> adapter.Process_Result {
 	return meter_process(cast(^Meter)data, request)
+}
+
+// ---------------------------------------------------------------------------
+// Product state flags and draft telemetry extension
+// ---------------------------------------------------------------------------
+
+// The capture mode is authoring state: a host that saved a session with capture
+// enabled restores that verification mode. Schema 3 appends this flag word.
+pulse_state_flags_save :: proc(data: rawptr) -> u32 {
+	meter := cast(^Meter)data
+	if meter_capture_enabled(meter) {
+		return STATE_FLAG_CAPTURE_ENABLED
+	}
+	return 0
+}
+
+pulse_state_flags_load :: proc(data: rawptr, flags: u32) {
+	meter := cast(^Meter)data
+	_ = meter_capture_set_enabled(meter, flags & STATE_FLAG_CAPTURE_ENABLED != 0)
+}
+
+// pulse_telemetry implements the draft Carnival telemetry-capture extension.
+// The adapter forwards main-thread extension calls here; the record layout is
+// clap.Carnival_Measurement_Record (aliased as Measurement_Record).
+pulse_telemetry: adapter.Telemetry_Ops = {
+	set_enabled = pulse_telemetry_set_enabled,
+	drain = pulse_telemetry_drain,
+	dropped = pulse_telemetry_dropped,
+	valid = pulse_telemetry_valid,
+	schema_version = pulse_telemetry_schema_version,
+}
+
+pulse_telemetry_set_enabled :: proc(data: rawptr, enabled: bool) -> bool {
+	context = runtime.default_context()
+	return meter_capture_set_enabled(cast(^Meter)data, enabled)
+}
+
+pulse_telemetry_drain :: proc(
+	data: rawptr,
+	sink: clap.Carnival_Capture_Sink,
+	max_records: u32,
+) -> u32 {
+	context = runtime.default_context()
+	return meter_measurement_drain_sink(cast(^Meter)data, sink, max_records)
+}
+
+pulse_telemetry_dropped :: proc(data: rawptr) -> u64 {
+	return meter_measurement_dropped(cast(^Meter)data)
+}
+
+pulse_telemetry_valid :: proc(data: rawptr) -> bool {
+	return meter_capture_valid(cast(^Meter)data)
+}
+
+pulse_telemetry_schema_version :: proc(data: rawptr) -> u32 {
+	return meter_capture_schema_version(cast(^Meter)data)
 }
 
 // ---------------------------------------------------------------------------

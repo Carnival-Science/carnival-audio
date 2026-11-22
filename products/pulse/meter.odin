@@ -9,7 +9,9 @@
 //   - samples are passed through bit-for-bit (in-place or separate buffers);
 //   - analysis is bounded by activation max_frames_count and a preallocated
 //     transport ring / measurement queue;
-//   - lost or dropped samples latch an explicit invalid measurement state.
+//   - lost or dropped audio samples latch the audio-domain invalid state;
+//   - lost measurement records invalidate only the capture domain, never live
+//     analysis, and capture is produced only when explicitly enabled.
 package pulse
 
 import "base:runtime"
@@ -21,6 +23,7 @@ import "carnival:core/stream"
 import "carnival:core/transport"
 
 import adapter "carnival:adapters/clap"
+import clap "carnival:third_party/clap/abi"
 
 CHANNELS :: 2
 
@@ -36,30 +39,30 @@ PARAM_HOLD_DECAY_ENABLED_INDEX :: 2
 PARAM_HOLD_DECAY_DB_INDEX :: 3
 
 // Schema 1 had IDs 1001..1003. Schema 2 adds 1004; a v1 fixture loads with 1004
-// at its descriptor default (20 dB/s). See docs/clap-plugin.md.
-STATE_SCHEMA :: u32(2)
+// at its descriptor default (20 dB/s). See docs/clap-plugin.md. Schema 3
+// appends the product flag word; bit 0 is the telemetry capture mode.
+STATE_SCHEMA :: u32(3)
+
+STATE_FLAG_CAPTURE_ENABLED :: u32(1 << 0)
 
 RING_CAPACITY_BLOCKS :: 16
 RING_GAP_CAPACITY :: 32
 MEASUREMENT_QUEUE_CAPACITY :: 4096
 
 // Measurement_Record is the canonical offline/test export: one record per
-// complete, sample-clock-aligned RMS window. UI snapshot cadence never
+// complete, sample-clock-aligned RMS window. It is the draft Carnival telemetry
+// wire record; `third_party/clap/abi` declares the layout so an independent
+// host can read it without importing product code. UI snapshot cadence never
 // creates, delays or drops these records; draining is an explicit host action.
-Measurement_Record :: struct {
-	epoch:       u64,
-	generation:  u64,
-	start_frame: i64,
-	frames:      u32,
-	channels:    u32,
-	sample_rate: u32,
-	peak:        [CHANNELS]f32,
-	peak_frame:  [CHANNELS]i64,
-	rms:         [CHANNELS]f32,
-	hold:        [CHANNELS]f32,
-	valid:       bool,
-	overrun:     bool,
-}
+//
+// The record carries both validity domains:
+//   valid          audio-domain validity (false after lost audio samples)
+//   overrun        Milestone 1 alias for audio-domain invalid
+//   capture_valid  capture-domain validity (false after lost records); it never
+//                  changes `valid` and live analysis ignores it.
+Measurement_Record :: clap.Carnival_Measurement_Record
+
+MEASUREMENT_SCHEMA_VERSION :: clap.CARNIVAL_MEASUREMENT_SCHEMA_VERSION
 
 Record_Queue :: struct {
 	records:  []Measurement_Record,
@@ -95,8 +98,18 @@ Meter :: struct {
 	last_rms:     [CHANNELS]f32,
 	last_rms_start: i64,
 	have_window:  bool,
-	invalid:      bool,
-	export_overflow: bool,
+
+	// Audio-domain validity: lost or out-of-order audio samples invalidate the
+	// live analysis (snapshot and record `valid`). Never set by measurement
+	// queue overflow.
+	audio_invalid: bool,
+
+	// Capture domain. Capture is opt-in; when disabled no records are produced
+	// at all, so the queue cannot become a lifecycle hazard. When enabled, a
+	// full queue drops the record and invalidates the capture domain only.
+	capture_enabled: u32, // atomic bool bit; 0 = off (default)
+	capture_invalid: u32, // atomic bool bit; 1 = a record was dropped
+
 	processed_blocks: u64,
 	generation:   u64,
 	record_generation: u64,
@@ -123,6 +136,8 @@ meter_create :: proc() -> ^Meter {
 	meter.allocator = allocator
 	meter.drain_enabled = true
 	meter.epoch = 1
+	meter.capture_enabled = 0
+	meter.capture_invalid = 0
 	meter.window_frames = 1024
 	meter.hold_frames = 4800
 	meter.hold_decay_enabled = true
@@ -187,8 +202,8 @@ meter_activate :: proc(meter: ^Meter, config: adapter.Activation_Config) -> bool
 	meter.frame_clock = 0
 	meter.generation = 0
 	meter.record_generation = 0
-	meter.invalid = false
-	meter.export_overflow = false
+	meter.audio_invalid = false
+	meter.capture_invalid = 0
 	meter.have_window = false
 	meter.last_rms = {}
 	meter.last_rms_start = 0
@@ -235,8 +250,8 @@ meter_reset :: proc(meter: ^Meter) {
 	sync.atomic_store_explicit(&meter.queue.read, 0, .Release)
 	sync.atomic_store_explicit(&meter.queue.dropped, 0, .Release)
 	sync.atomic_store_explicit(&meter.queue.high_water, 0, .Release)
-	meter.invalid = false
-	meter.export_overflow = false
+	meter.audio_invalid = false
+	meter.capture_invalid = 0
 	meter.have_window = false
 	meter.last_rms = {}
 	meter.last_rms_start = 0
@@ -298,12 +313,12 @@ meter_process :: proc(meter: ^Meter, request: ^adapter.Process_Request) -> adapt
 	case .Accepted:
 		// contiguous
 	case .Accepted_With_Gap:
-		meter.invalid = true
+		meter.audio_invalid = true
 	case .Dropped_Overrun, .Rejected_Duplicate, .Rejected_Invalid:
-		meter.invalid = true
+		meter.audio_invalid = true
 	}
 	if transport.audio_ring_overrun_seen(&meter.ring) || transport.audio_ring_ledger_overflow_seen(&meter.ring) {
-		meter.invalid = true
+		meter.audio_invalid = true
 	}
 
 	meter.frame_clock += i64(frames)
@@ -410,7 +425,14 @@ rms_window_callback :: proc(user_data: rawptr, record: dsp.RMS_Record) {
 		meter.last_rms[channel] = record.rms[channel]
 	}
 	meter.record_generation += 1
+	// Capture is a verification mode. When it is off the record is not even
+	// constructed: live analysis is unchanged and the bounded queue stays empty.
+	if sync.atomic_load_explicit(&meter.capture_enabled, .Acquire) == 0 {
+		return
+	}
+	capture_valid := sync.atomic_load_explicit(&meter.capture_invalid, .Acquire) == 0
 	measurement := Measurement_Record{
+		schema_version = MEASUREMENT_SCHEMA_VERSION,
 		epoch = meter.epoch,
 		generation = meter.record_generation,
 		start_frame = record.start_frame,
@@ -418,8 +440,9 @@ rms_window_callback :: proc(user_data: rawptr, record: dsp.RMS_Record) {
 		channels = CHANNELS,
 		sample_rate = u32(max(int(meter.sample_rate), 1)),
 		rms = {record.rms[0], record.rms[1]},
-		valid = !meter.invalid,
-		overrun = meter.invalid,
+		valid = !meter.audio_invalid,
+		overrun = meter.audio_invalid,
+		capture_valid = capture_valid,
 	}
 	for channel in 0 ..< CHANNELS {
 		peak := meter.window_peak.per_channel[channel]
@@ -428,8 +451,9 @@ rms_window_callback :: proc(user_data: rawptr, record: dsp.RMS_Record) {
 		measurement.hold[channel] = meter.hold.held[channel]
 	}
 	if !meter_measurement_push(meter, measurement) {
-		meter.export_overflow = true
-		meter.invalid = true
+		// A lost measurement record invalidates the verification capture only.
+		// Live analysis and the audio-domain validity are unaffected.
+		sync.atomic_store_explicit(&meter.capture_invalid, 1, .Release)
 	}
 }
 
@@ -495,6 +519,98 @@ meter_measurement_high_water :: proc(meter: ^Meter) -> u64 {
 	return sync.atomic_load_explicit(&meter.queue.high_water, .Acquire)
 }
 
+// ---------------------------------------------------------------------------
+// Capture mode (verification seam)
+// ---------------------------------------------------------------------------
+
+// meter_capture_enabled reports the explicit capture mode. Off by default.
+meter_capture_enabled :: proc(meter: ^Meter) -> bool {
+	if meter == nil {
+		return false
+	}
+	return sync.atomic_load_explicit(&meter.capture_enabled, .Acquire) != 0
+}
+
+// meter_capture_set_enabled switches canonical record capture. It is a main
+// thread operation (the telemetry extension documents the same rule). Enabling
+// (or disabling) starts a fresh capture episode: pending records are discarded
+// and the dropped counter and capture validity are reset. The audio thread may
+// be producing at the instant of the switch; callers needing an exact boundary
+// should stop processing first. Live analysis is never affected.
+meter_capture_set_enabled :: proc(meter: ^Meter, enabled: bool) -> bool {
+	if meter == nil {
+		return false
+	}
+	// Stop production first so a concurrent push cannot race the queue reset.
+	sync.atomic_store_explicit(&meter.capture_enabled, 0, .Release)
+	if meter.queue.records != nil {
+		sync.atomic_store_explicit(&meter.queue.write, 0, .Release)
+		sync.atomic_store_explicit(&meter.queue.read, 0, .Release)
+		sync.atomic_store_explicit(&meter.queue.dropped, 0, .Release)
+		sync.atomic_store_explicit(&meter.queue.high_water, 0, .Release)
+	}
+	sync.atomic_store_explicit(&meter.capture_invalid, 0, .Release)
+	if enabled {
+		sync.atomic_store_explicit(&meter.capture_enabled, 1, .Release)
+	}
+	return true
+}
+
+// meter_capture_valid is the capture-domain validity. It is true when capture
+// is off, and false only after a canonical record was dropped because the queue
+// was full. It never reflects lost audio samples (that is the audio domain).
+meter_capture_valid :: proc(meter: ^Meter) -> bool {
+	if meter == nil {
+		return true
+	}
+	return sync.atomic_load_explicit(&meter.capture_invalid, .Acquire) == 0
+}
+
+// meter_capture_schema_version reports the canonical record schema implemented
+// by this build.
+meter_capture_schema_version :: proc(meter: ^Meter) -> u32 {
+	if meter == nil {
+		return 0
+	}
+	return MEASUREMENT_SCHEMA_VERSION
+}
+
+// meter_measurement_drain_sink delivers up to max_records pending canonical
+// records, oldest first, through a host callback. max_records == 0 drains every
+// pending record. The record pointer passed to the callback points into the
+// bounded queue and is valid only for the duration of that callback; the read
+// cursor advances only after the callback returns true, so the audio thread
+// never overwrites an unread or in-flight slot. Returns the number delivered.
+meter_measurement_drain_sink :: proc(
+	meter: ^Meter,
+	sink: clap.Carnival_Capture_Sink,
+	max_records: u32,
+) -> u32 {
+	if meter == nil || meter.queue.records == nil || sink.push == nil {
+		return 0
+	}
+	read := sync.atomic_load_explicit(&meter.queue.read, .Relaxed)
+	write := sync.atomic_load_explicit(&meter.queue.write, .Acquire)
+	available := write - read
+	limit := available
+	if max_records != 0 {
+		limit = min(available, u64(max_records))
+	}
+	delivered: u64 = 0
+	for delivered < limit {
+		slot := int((read + delivered) % u64(meter.queue.capacity))
+		record := &meter.queue.records[slot]
+		if !sink.push(sink.ctx, record) {
+			break
+		}
+		delivered += 1
+	}
+	if delivered > 0 {
+		sync.atomic_store_explicit(&meter.queue.read, read + delivered, .Release)
+	}
+	return u32(delivered)
+}
+
 // meter_snapshot is the latest-wins presentation view. Reading it has no effect
 // on canonical measurement records.
 meter_snapshot :: proc(meter: ^Meter) -> transport.Measurement_Snapshot {
@@ -509,8 +625,8 @@ meter_publish_snapshot :: proc(meter: ^Meter) {
 	meter.generation += 1
 	snapshot := transport.Measurement_Snapshot{
 		generation = meter.generation,
-		valid = !meter.invalid && meter.overall_peak.overall.valid,
-		overrun = meter.invalid,
+		valid = !meter.audio_invalid && meter.overall_peak.overall.valid,
+		overrun = meter.audio_invalid,
 		epoch = meter.epoch,
 		frame = meter.frame_clock,
 		sample_rate = max(int(meter.sample_rate), 1),

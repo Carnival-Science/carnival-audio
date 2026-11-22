@@ -32,11 +32,15 @@ Direct :: struct {
 	params:   [4]f64,
 }
 
-direct_init :: proc(t: ^testing.T, max_frames: u32, rate: int = 48000) -> Direct {
+direct_init :: proc(t: ^testing.T, max_frames: u32, rate: int = 48000, capture := true) -> Direct {
 	result: Direct
 	result.meter = meter_create()
 	if result.meter == nil {
 		testing.fail_now(t, "meter_create")
+	}
+	// The test harness opts in to canonical capture; the plugin default is off.
+	if capture {
+		_ = meter_capture_set_enabled(result.meter, true)
 	}
 	result.params = {1024, 4800, 1, 20}
 	config := adapter.Activation_Config{sample_rate = f64(rate), min_frames_count = 1, max_frames_count = max_frames}
@@ -119,9 +123,10 @@ sine_stream :: proc(frames: int, rate: int, amplitude_left, amplitude_right: f32
 }
 
 records_equal :: proc(a, b: Measurement_Record) -> bool {
-	if a.epoch != b.epoch || a.generation != b.generation || a.start_frame != b.start_frame ||
+	if a.schema_version != b.schema_version ||
+		a.epoch != b.epoch || a.generation != b.generation || a.start_frame != b.start_frame ||
 		a.frames != b.frames || a.channels != b.channels || a.sample_rate != b.sample_rate ||
-		a.valid != b.valid || a.overrun != b.overrun {
+		a.valid != b.valid || a.overrun != b.overrun || a.capture_valid != b.capture_valid {
 		return false
 	}
 	for channel in 0 ..< CHANNELS {
@@ -409,7 +414,85 @@ test_forced_overrun_invalidates_without_breaking_passthrough :: proc(t: ^testing
 // Keep the transport import exercised without leaking it into the product API.
 @(private)
 transport_overrun_seen :: proc(meter: ^Meter) -> bool {
-	return meter.invalid && meter.ring.overrun_latched != 0
+	return meter.audio_invalid && meter.ring.overrun_latched != 0
+}
+
+@(test)
+test_capture_off_makes_the_measurement_queue_harmless :: proc(t: ^testing.T) {
+	harness := direct_init(t, 256, 48000, false)
+	defer direct_destroy(&harness)
+	testing.expect(t, !meter_capture_enabled(harness.meter), "capture off is the default")
+	harness.params[PARAM_WINDOW_FRAMES_INDEX] = 128
+
+	source := make([]f32, 256 * 2)
+	defer delete(source)
+	for frame in 0 ..< 256 {
+		source[frame * 2 + 0] = 0.5
+		source[frame * 2 + 1] = -0.25
+	}
+	// Far more 128-frame windows than the queue can hold if capture existed.
+	windows := int(MEASUREMENT_QUEUE_CAPACITY) + 16
+	blocks := windows * 128 / 256
+	for _ in 0 ..< blocks {
+		testing.expect_value(t, direct_process(&harness, source, 256), adapter.Process_Result.Continue)
+	}
+
+	// Analysis kept running; nothing entered the capture queue and no invalid
+	// latch was produced by the absence of a drain consumer.
+	testing.expect(t, harness.meter.record_generation > u64(MEASUREMENT_QUEUE_CAPACITY),
+		"live analysis produced more windows than queue capacity")
+	testing.expect_value(t, meter_measurement_pending(harness.meter), 0)
+	testing.expect_value(t, meter_measurement_dropped(harness.meter), u64(0))
+	testing.expect(t, meter_capture_valid(harness.meter), "capture domain valid")
+	snapshot := meter_snapshot(harness.meter)
+	testing.expect(t, snapshot.valid && !snapshot.overrun, "live snapshot stays valid")
+	drain: Drain
+	direct_drain(&harness, &drain)
+	testing.expect_value(t, drain.count, 0)
+}
+
+@(test)
+test_capture_overflow_invalidates_capture_not_live_analysis :: proc(t: ^testing.T) {
+	harness := direct_init(t, 256)
+	defer direct_destroy(&harness)
+	testing.expect(t, meter_capture_enabled(harness.meter), "capture enabled by harness")
+	harness.params[PARAM_WINDOW_FRAMES_INDEX] = 128
+
+	source := make([]f32, 256 * 2)
+	defer delete(source)
+	for frame in 0 ..< 256 {
+		source[frame * 2 + 0] = 0.5
+		source[frame * 2 + 1] = -0.25
+	}
+	windows := int(MEASUREMENT_QUEUE_CAPACITY) + 16
+	blocks := windows * 128 / 256
+	for _ in 0 ..< blocks {
+		testing.expect_value(t, direct_process(&harness, source, 256), adapter.Process_Result.Continue)
+	}
+
+	testing.expect(t, !meter_capture_valid(harness.meter), "capture domain invalid after record loss")
+	testing.expect(t, meter_measurement_dropped(harness.meter) > u64(0), "dropped-record counter")
+	testing.expect_value(t, meter_measurement_pending(harness.meter), int(MEASUREMENT_QUEUE_CAPACITY))
+	snapshot := meter_snapshot(harness.meter)
+	testing.expect(t, snapshot.valid && !snapshot.overrun, "live analysis is unaffected by capture loss")
+
+	// Records emitted before the first drop are untouched and audio-valid.
+	drain: Drain
+	direct_drain(&harness, &drain)
+	testing.expect_value(t, drain.count, MAX_TEST_RECORDS)
+	for record in drain.records[:drain.count] {
+		testing.expect_value(t, record.schema_version, MEASUREMENT_SCHEMA_VERSION)
+		testing.expect(t, record.valid && !record.overrun, "audio domain stays valid")
+		testing.expect(t, record.capture_valid, "records emitted before the drop")
+	}
+	testing.expect(t, !meter_capture_valid(harness.meter),
+		"draining the queue does not repair capture validity")
+
+	// A new capture episode clears the capture-domain latch and dropped counter.
+	testing.expect(t, meter_capture_set_enabled(harness.meter, true), "re-enable capture")
+	testing.expect(t, meter_capture_valid(harness.meter), "re-enable clears capture invalid")
+	testing.expect_value(t, meter_measurement_dropped(harness.meter), u64(0))
+	testing.expect_value(t, meter_measurement_pending(harness.meter), 0)
 }
 
 @(test)
@@ -516,6 +599,93 @@ params_of :: proc(plugin: ^clap.Plugin) -> ^clap.Plugin_Params {
 
 state_of :: proc(plugin: ^clap.Plugin) -> ^clap.Plugin_State {
 	return cast(^clap.Plugin_State)plugin.get_extension(plugin, cstring(clap.CLAP_EXT_STATE))
+}
+
+telemetry_of :: proc(plugin: ^clap.Plugin) -> ^clap.Carnival_Telemetry_Capture {
+	return cast(^clap.Carnival_Telemetry_Capture)plugin.get_extension(
+		plugin, cstring(clap.CARNIVAL_EXT_TELEMETRY_CAPTURE_DRAFT))
+}
+
+Capture_Collector :: struct {
+	records: [MAX_TEST_RECORDS]Measurement_Record,
+	count:   int,
+}
+
+capture_sink_push :: proc "c" (ctx: rawptr, record: ^clap.Carnival_Measurement_Record) -> bool {
+	collector := cast(^Capture_Collector)ctx
+	if collector == nil || record == nil || collector.count >= len(collector.records) {
+		return false
+	}
+	collector.records[collector.count] = record^
+	collector.count += 1
+	return true
+}
+
+Param_Event_List :: struct {
+	event: clap.Event_Param_Value,
+}
+
+param_events_size :: proc "c" (list: ^clap.Input_Events) -> u32 {
+	_ = list
+	return 1
+}
+
+param_events_get :: proc "c" (list: ^clap.Input_Events, index: u32) -> ^clap.Event_Header {
+	if index != 0 {
+		return nil
+	}
+	return &(cast(^Param_Event_List)list.ctx).event.header
+}
+
+param_events_push :: proc "c" (list: ^clap.Output_Events, event: ^clap.Event_Header) -> bool {
+	_ = list
+	_ = event
+	return true
+}
+
+// clap_set_param exercises the real params extension path used by a host.
+clap_set_param :: proc(plugin: ^clap.Plugin, id: u32, value: f64) -> bool {
+	params := params_of(plugin)
+	if params == nil || params.flush == nil {
+		return false
+	}
+	list := Param_Event_List{
+		event = clap.Event_Param_Value{
+			header = clap.Event_Header{
+				size = u32(size_of(clap.Event_Param_Value)),
+				space_id = clap.CLAP_CORE_EVENT_SPACE_ID,
+				type = u16(clap.Event_Type.Param_Value),
+			},
+			param_id = id,
+			value = value,
+		},
+	}
+	input := clap.Input_Events{ctx = &list, size = param_events_size, get = param_events_get}
+	output := clap.Output_Events{ctx = &list, try_push = param_events_push}
+	params.flush(plugin, &input, &output)
+	return true
+}
+
+clap_process_frames :: proc(
+	t: ^testing.T,
+	plugin: ^clap.Plugin,
+	harness: ^Harness,
+	source: []f32,
+	frames: int,
+) {
+	for frame in 0 ..< frames {
+		for channel in 0 ..< CHANNELS {
+			harness.input[channel][frame] = source[frame * CHANNELS + channel]
+		}
+	}
+	process := clap.Process{
+		frames_count = u32(frames),
+		audio_inputs = &harness.inputs[0],
+		audio_outputs = &harness.outputs[0],
+		audio_inputs_count = 1,
+		audio_outputs_count = 1,
+	}
+	testing.expect_value(t, plugin.process(plugin, &process), clap.Process_Status(clap.CLAP_PROCESS_CONTINUE))
 }
 
 @(test)
@@ -648,7 +818,7 @@ test_authoring_state_round_trip_is_processing_independent :: proc(t: ^testing.T)
 }
 
 @(test)
-test_state_v1_fixture_migrates_to_schema_2 :: proc(t: ^testing.T) {
+test_state_v1_fixture_migrates_to_schema_3 :: proc(t: ^testing.T) {
 	plugin, harness := create_plugin(t)
 	defer destroy_plugin(plugin, harness)
 	testing.expect(t, plugin.init(plugin), "init")
@@ -684,13 +854,179 @@ test_state_v1_fixture_migrates_to_schema_2 :: proc(t: ^testing.T) {
 	saved := Mem_Stream{}
 	ostream := clap.OStream{ctx = &saved, write = mem_write}
 	testing.expect(t, state.save(plugin, &ostream), "save migrated")
-	testing.expect_value(t, get_u32(saved.data[:], 8), u32(2))
+	testing.expect_value(t, get_u32(saved.data[:], 8), u32(3))
 	testing.expect_value(t, get_u32(saved.data[:], 12), u32(4))
+	// Schema 1 carried no flag word: capture mode stays off (the default).
+	testing.expect_value(t, saved.size, 8 + 4 + 4 + 4 * 12 + 4)
+	testing.expect_value(t, get_u32(saved.data[:], 64), u32(0))
 }
 
 get_u32 :: proc(buffer: []u8, offset: int) -> u32 {
 	return u32(buffer[offset]) | u32(buffer[offset + 1]) << 8 |
 		u32(buffer[offset + 2]) << 16 | u32(buffer[offset + 3]) << 24
+}
+
+@(test)
+test_capture_mode_round_trips_in_authoring_state :: proc(t: ^testing.T) {
+	plugin, harness := create_plugin(t)
+	defer destroy_plugin(plugin, harness)
+	testing.expect(t, plugin.init(plugin), "init")
+	telemetry := telemetry_of(plugin)
+	state := state_of(plugin)
+	testing.expect(t, telemetry != nil, "telemetry extension")
+	testing.expect(t, state != nil, "state extension")
+	if telemetry == nil || state == nil {
+		return
+	}
+
+	// Capture mode is authoring state (schema 3 flag word).
+	testing.expect(t, telemetry.set_enabled(plugin, true), "enable capture")
+	enabled := Mem_Stream{}
+	ostream := clap.OStream{ctx = &enabled, write = mem_write}
+	testing.expect(t, state.save(plugin, &ostream), "save capture-on state")
+	testing.expect_value(t, enabled.size, 8 + 4 + 4 + 4 * 12 + 4)
+	testing.expect_value(t, get_u32(enabled.data[:], 64), STATE_FLAG_CAPTURE_ENABLED)
+
+	testing.expect(t, telemetry.set_enabled(plugin, false), "disable capture")
+	disabled := Mem_Stream{}
+	ostream = clap.OStream{ctx = &disabled, write = mem_write}
+	testing.expect(t, state.save(plugin, &ostream), "save capture-off state")
+	testing.expect_value(t, get_u32(disabled.data[:], 64), u32(0))
+
+	// Loading the capture-on state restores the mode; a subsequent save is
+	// byte-identical (authoring round-trip).
+	stream := enabled
+	stream.read = 0
+	istream := clap.IStream{ctx = &stream, read = mem_read}
+	testing.expect(t, state.load(plugin, &istream), "load capture-on state")
+	restored := Mem_Stream{}
+	ostream = clap.OStream{ctx = &restored, write = mem_write}
+	testing.expect(t, state.save(plugin, &ostream), "save restored state")
+	testing.expect_value(t, restored.size, enabled.size)
+	testing.expect(t, mem.compare(restored.data[:restored.size], enabled.data[:enabled.size]) == 0,
+		"capture mode restored from authoring state")
+}
+
+@(test)
+test_telemetry_extension_drain_matches_backend_export :: proc(t: ^testing.T) {
+	plugin, harness := create_plugin(t)
+	defer destroy_plugin(plugin, harness)
+	testing.expect(t, plugin.init(plugin), "init")
+	testing.expect(t, plugin.activate(plugin, 48000, 64, 512), "activate")
+	testing.expect(t, plugin.start_processing(plugin), "start")
+
+	telemetry := telemetry_of(plugin)
+	testing.expect(t, telemetry != nil, "draft telemetry extension")
+	if telemetry == nil {
+		return
+	}
+	testing.expect_value(t, telemetry.schema_version(plugin), MEASUREMENT_SCHEMA_VERSION)
+	testing.expect(t, telemetry.valid(plugin), "capture domain valid before enable")
+	testing.expect_value(t, telemetry.dropped(plugin), u64(0))
+
+	source := make([]f32, 512 * 2)
+	defer delete(source)
+	for frame in 0 ..< 512 {
+		source[frame * 2] = f32(frame) * 1e-4 - 0.02
+		source[frame * 2 + 1] = -f32(frame) * 1e-4
+	}
+	collector: Capture_Collector
+	sink := clap.Carnival_Capture_Sink{ctx = &collector, push = capture_sink_push}
+
+	// Capture is off by default: the same analysis path runs but produces no
+	// canonical records.
+	clap_process_frames(t, plugin, harness, source, 512)
+	testing.expect_value(t, telemetry.drain(plugin, sink, 0), u32(0))
+
+	// Both runs start from a reset sample clock and the same default params, so
+	// the extension drained records must be bit-identical to the backend export.
+	plugin.reset(plugin)
+	testing.expect(t, telemetry.set_enabled(plugin, true), "enable capture")
+
+	stream := make([]f32, 4096 * 2)
+	defer delete(stream)
+	for index in 0 ..< len(stream) {
+		stream[index] = f32((index * 37) % 1000) / 1000 * 0.5 - 0.25
+	}
+	offset := 0
+	for offset < 4096 {
+		clap_process_frames(t, plugin, harness, stream[offset * 2:], 512)
+		offset += 512
+	}
+
+	delivered := telemetry.drain(plugin, sink, 0)
+	testing.expect_value(t, delivered, u32(4))
+	testing.expect_value(t, collector.count, 4)
+
+	direct := direct_init(t, 512)
+	defer direct_destroy(&direct)
+	meter_reset(direct.meter)
+	offset = 0
+	for offset < 4096 {
+		testing.expect_value(t, direct_process(&direct, stream[offset * 2:], 512),
+			adapter.Process_Result.Continue)
+		offset += 512
+	}
+	exported: Drain
+	direct_drain(&direct, &exported)
+	testing.expect_value(t, exported.count, 4)
+	for index in 0 ..< min(collector.count, exported.count) {
+		testing.expectf(t, records_equal(collector.records[index], exported.records[index]),
+			"extension record %d differs from backend export", index)
+	}
+
+	// A second drain reports nothing until more windows complete.
+	testing.expect_value(t, telemetry.drain(plugin, sink, 0), u32(0))
+}
+
+@(test)
+test_telemetry_extension_reports_capture_domain_loss :: proc(t: ^testing.T) {
+	plugin, harness := create_plugin(t)
+	defer destroy_plugin(plugin, harness)
+	testing.expect(t, plugin.init(plugin), "init")
+	testing.expect(t, plugin.activate(plugin, 48000, 64, 512), "activate")
+	testing.expect(t, plugin.start_processing(plugin), "start")
+
+	telemetry := telemetry_of(plugin)
+	testing.expect(t, telemetry != nil, "draft telemetry extension")
+	if telemetry == nil {
+		return
+	}
+	testing.expect(t, telemetry.set_enabled(plugin, true), "enable capture")
+	testing.expect(t, clap_set_param(plugin, PARAM_WINDOW_FRAMES, 128), "set window")
+
+	source := make([]f32, 512 * 2)
+	defer delete(source)
+	for frame in 0 ..< 512 {
+		source[frame * 2] = 0.5
+		source[frame * 2 + 1] = -0.25
+	}
+	// Four 128-frame windows per block; more windows than the queue holds and
+	// no drain consumer, so the capture queue overflows.
+	windows := int(MEASUREMENT_QUEUE_CAPACITY) + 16
+	blocks := (windows + 3) / 4
+	for _ in 0 ..< blocks {
+		clap_process_frames(t, plugin, harness, source, 512)
+	}
+
+	testing.expect(t, !telemetry.valid(plugin), "capture-domain invalid after record loss")
+	testing.expect(t, telemetry.dropped(plugin) > u64(0), "dropped-record counter")
+
+	collector: Capture_Collector
+	sink := clap.Carnival_Capture_Sink{ctx = &collector, push = capture_sink_push}
+	delivered := telemetry.drain(plugin, sink, 0)
+	testing.expect_value(t, delivered, u32(MAX_TEST_RECORDS))
+	for record in collector.records[:collector.count] {
+		testing.expect_value(t, record.schema_version, MEASUREMENT_SCHEMA_VERSION)
+		testing.expect(t, record.valid && !record.overrun, "audio domain valid")
+		testing.expect(t, record.capture_valid, "records captured before the first drop")
+	}
+	testing.expect(t, !telemetry.valid(plugin), "drain does not repair capture validity")
+
+	testing.expect(t, telemetry.set_enabled(plugin, false), "disable capture")
+	testing.expect(t, telemetry.valid(plugin), "disable clears capture invalid")
+	testing.expect_value(t, telemetry.dropped(plugin), u64(0))
+	testing.expect_value(t, telemetry.drain(plugin, sink, 0), u32(0))
 }
 
 // ---------------------------------------------------------------------------
