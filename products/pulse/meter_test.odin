@@ -495,10 +495,41 @@ test_capture_overflow_invalidates_capture_not_live_analysis :: proc(t: ^testing.
 		"draining the queue does not repair capture validity")
 
 	// A new capture episode clears the capture-domain latch and dropped counter.
-	testing.expect(t, meter_capture_set_enabled(harness.meter, true), "re-enable capture")
+	testing.expect(t, meter_capture_set_enabled(harness.meter, true) == .Ok, "re-enable capture")
 	testing.expect(t, meter_capture_valid(harness.meter), "re-enable clears capture invalid")
 	testing.expect_value(t, meter_measurement_dropped(harness.meter), u64(0))
 	testing.expect_value(t, meter_measurement_pending(harness.meter), 0)
+}
+
+@(test)
+test_capture_episode_switch_requires_quiescence :: proc(t: ^testing.T) {
+	harness := direct_init(t, 1024)
+	defer direct_destroy(&harness)
+	testing.expect_value(t, meter_capture_set_enabled(harness.meter, true), Capture_Set_Result.Ok)
+	meter_set_processing(harness.meter, true)
+	testing.expect_value(t, meter_capture_set_enabled(harness.meter, false), Capture_Set_Result.Busy)
+	testing.expect(t, meter_capture_enabled(harness.meter), "refused switch kept the episode")
+	meter_set_processing(harness.meter, false)
+	testing.expect_value(t, meter_capture_set_enabled(harness.meter, false), Capture_Set_Result.Ok)
+	testing.expect(t, !meter_capture_enabled(harness.meter), "disabled after quiescence")
+}
+
+@(test)
+test_pulse_declares_no_processing_checkpoint :: proc(t: ^testing.T) {
+	plugin, harness := create_plugin(t)
+	defer destroy_plugin(plugin, harness)
+	testing.expect(t, plugin.init(plugin), "init")
+	extension := cast(^clap.Carnival_Processing_Checkpoint)plugin.get_extension(
+		plugin, cstring(clap.CARNIVAL_EXT_PROCESSING_CHECKPOINT_DRAFT))
+	testing.expect(t, extension != nil, "checkpoint extension is exposed for the capability query")
+	if extension == nil {
+		return
+	}
+	// Pulse's processing state is the window/hold/clock pipeline tied to an
+	// absolute sample position; it declares the optional capability unsupported
+	// rather than promising a partial resume.
+	testing.expect(t, !extension.supported(plugin), "Pulse does not support checkpoints")
+	testing.expect_value(t, extension.schema_version(plugin), u32(0))
 }
 
 @(test)
@@ -947,7 +978,10 @@ test_telemetry_extension_drain_matches_backend_export :: proc(t: ^testing.T) {
 	// Both runs start from a reset sample clock and the same default params, so
 	// the extension drained records must be bit-identical to the backend export.
 	plugin.reset(plugin)
+	// Capture episodes require quiescent processing.
+	plugin.stop_processing(plugin)
 	testing.expect(t, telemetry.set_enabled(plugin, true), "enable capture")
+	testing.expect(t, plugin.start_processing(plugin), "restart")
 
 	stream := make([]f32, 4096 * 2)
 	defer delete(stream)
@@ -991,14 +1025,15 @@ test_telemetry_extension_reports_capture_domain_loss :: proc(t: ^testing.T) {
 	defer destroy_plugin(plugin, harness)
 	testing.expect(t, plugin.init(plugin), "init")
 	testing.expect(t, plugin.activate(plugin, 48000, 64, 512), "activate")
-	testing.expect(t, plugin.start_processing(plugin), "start")
 
 	telemetry := telemetry_of(plugin)
 	testing.expect(t, telemetry != nil, "draft telemetry extension")
 	if telemetry == nil {
 		return
 	}
+	// Enable before start: an episode switch requires quiescent processing.
 	testing.expect(t, telemetry.set_enabled(plugin, true), "enable capture")
+	testing.expect(t, plugin.start_processing(plugin), "start")
 	testing.expect(t, clap_set_param(plugin, PARAM_WINDOW_FRAMES, 128), "set window")
 
 	source := make([]f32, 512 * 2)
@@ -1029,6 +1064,7 @@ test_telemetry_extension_reports_capture_domain_loss :: proc(t: ^testing.T) {
 	}
 	testing.expect(t, !telemetry.valid(plugin), "drain does not repair capture validity")
 
+	plugin.stop_processing(plugin)
 	testing.expect(t, telemetry.set_enabled(plugin, false), "disable capture")
 	testing.expect(t, telemetry.valid(plugin), "disable clears capture invalid")
 	testing.expect_value(t, telemetry.dropped(plugin), u64(0))

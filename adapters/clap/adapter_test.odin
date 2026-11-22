@@ -466,6 +466,31 @@ test_draft_telemetry_extension_forwarding :: proc(t: ^testing.T) {
 }
 
 @(test)
+test_capture_episode_switch_requires_quiescent_processing :: proc(t: ^testing.T) {
+	plugin, harness := instantiate(t)
+	defer destroy_instance(plugin, harness)
+	testing.expect(t, plugin.init(plugin), "init")
+	testing.expect(t, plugin.activate(plugin, 48000, 1, 64), "activate")
+
+	extension := cast(^clap.Carnival_Telemetry_Capture)plugin.get_extension(
+		plugin, cstring(clap.CARNIVAL_EXT_TELEMETRY_CAPTURE_DRAFT))
+	testing.expect(t, extension != nil, "telemetry extension")
+	if extension == nil {
+		return
+	}
+	// Quiescent before start_processing: the episode switch is allowed.
+	testing.expect(t, extension.set_enabled(plugin, true), "enable while stopped")
+	testing.expect(t, plugin.start_processing(plugin), "start")
+	testing.expect(t, !extension.set_enabled(plugin, false), "disable refused while processing")
+	testing.expect(t, !extension.set_enabled(plugin, true), "re-enable refused while processing")
+	testing.expect(t, (cast(^Test_Data)instance_of(plugin).data).capture_enabled,
+		"refused switch did not change the episode")
+	plugin.stop_processing(plugin)
+	testing.expect(t, extension.set_enabled(plugin, false), "disable after stop")
+	testing.expect(t, !(cast(^Test_Data)instance_of(plugin).data).capture_enabled, "disabled")
+}
+
+@(test)
 test_lifecycle_and_thread_state_rules :: proc(t: ^testing.T) {
 	plugin, harness := instantiate(t)
 	defer destroy_instance(plugin, harness)

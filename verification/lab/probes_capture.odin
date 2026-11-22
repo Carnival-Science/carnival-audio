@@ -15,7 +15,7 @@ probe_capture_toggle :: proc(ctx: ^Run_Context) -> Probe_Builder {
 	builder := probe_start(
 		"capture_toggle",
 		"capture_episode_semantics",
-		"Enabling capture starts a fresh episode (queue cleared, dropped zeroed); disabling stops record production; re-enabling starts another episode. Live audio is unaffected. Main-thread calls only.",
+		"Enabling capture starts a fresh episode (queue cleared, dropped zeroed); disabling stops record production; re-enabling starts another episode. An episode switch requires quiescent processing: the host stops processing first. Live audio is unaffected. Main-thread calls only.",
 	)
 	if !ctx.scenario.telemetry.enabled {
 		builder.status = .Skip
@@ -33,10 +33,13 @@ probe_capture_toggle :: proc(ctx: ^Run_Context) -> Probe_Builder {
 		builder.summary = "specimen has no telemetry extension"
 		return builder
 	}
+	// An episode switch requires quiescent processing.
+	host.instance_stop(instance)
 	if !host.instance_capture_enable(instance, true) {
 		probe_fail(&builder, "capture enable failed")
 		return builder
 	}
+	_ = host.instance_start(instance)
 	metric_add_int(&builder, "schema_version", int(host.instance_capture_schema_version(instance)))
 	quarter := ctx.scenario.input.frames / 4
 	if quarter <= 0 {
@@ -53,10 +56,15 @@ probe_capture_toggle :: proc(ctx: ^Run_Context) -> Probe_Builder {
 	_ = process_range(instance, ctx.input, 0, quarter, output, 0)
 	first_count := host.instance_capture_drain(instance, &collector)
 	metric_add(&builder, "capture_valid_first_episode", fmt.aprintf("%v", host.instance_capture_valid(instance)))
+	// An episode switch requires quiescent processing: stop, toggle, restart.
+	host.instance_stop(instance)
 	disable_ok := host.instance_capture_enable(instance, false)
+	_ = host.instance_start(instance)
 	_ = process_range(instance, ctx.input, quarter, quarter, output, quarter)
 	second_count := host.instance_capture_drain(instance, &collector)
+	host.instance_stop(instance)
 	enable_ok := host.instance_capture_enable(instance, true)
+	_ = host.instance_start(instance)
 	_ = process_range(instance, ctx.input, quarter * 2, quarter, output, quarter * 2)
 	third_count := host.instance_capture_drain(instance, &collector)
 	metric_add_int(&builder, "records_first_episode", int(first_count))

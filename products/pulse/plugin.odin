@@ -138,11 +138,15 @@ pulse_backend_deactivate :: proc(data: rawptr) {
 }
 
 pulse_backend_start :: proc(data: rawptr) -> bool {
-	return data != nil
+	if data == nil {
+		return false
+	}
+	meter_set_processing(cast(^Meter)data, true)
+	return true
 }
 
 pulse_backend_stop :: proc(data: rawptr) {
-	_ = data
+	meter_set_processing(cast(^Meter)data, false)
 }
 
 pulse_backend_reset :: proc(data: rawptr) {
@@ -170,6 +174,9 @@ pulse_state_flags_save :: proc(data: rawptr) -> u32 {
 
 pulse_state_flags_load :: proc(data: rawptr, flags: u32) {
 	meter := cast(^Meter)data
+	// Capture mode is authoring state, but switching the live episode still
+	// needs quiescence. A host that loads state while processing is active gets
+	// no episode switch; CLAP hosts load state while stopped.
 	_ = meter_capture_set_enabled(meter, flags & STATE_FLAG_CAPTURE_ENABLED != 0)
 }
 
@@ -186,7 +193,7 @@ pulse_telemetry: adapter.Telemetry_Ops = {
 
 pulse_telemetry_set_enabled :: proc(data: rawptr, enabled: bool) -> bool {
 	context = runtime.default_context()
-	return meter_capture_set_enabled(cast(^Meter)data, enabled)
+	return meter_capture_set_enabled(cast(^Meter)data, enabled) == .Ok
 }
 
 pulse_telemetry_drain :: proc(

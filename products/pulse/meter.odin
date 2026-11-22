@@ -49,6 +49,16 @@ RING_CAPACITY_BLOCKS :: 16
 RING_GAP_CAPACITY :: 32
 MEASUREMENT_QUEUE_CAPACITY :: 4096
 
+// Capture_Set_Result is the outcome of an attempt to start or end a capture
+// episode. A capture episode switch requires quiescent processing: the audio
+// thread may be inside a publication, and the episode reset clears the queue.
+// `Busy` is returned while the host has processing started; the host must call
+// clap.stop_processing (or the standalone equivalent) first.
+Capture_Set_Result :: enum u8 {
+	Ok,
+	Busy,
+}
+
 // Measurement_Record is the canonical offline/test export: one record per
 // complete, sample-clock-aligned RMS window. It is the draft Carnival telemetry
 // wire record; `third_party/clap/abi` declares the layout so an independent
@@ -124,6 +134,11 @@ Meter :: struct {
 	processed_blocks: u64,
 	generation:   u64,
 	record_generation: u64,
+
+	// Quiescence. The host/adapter marks processing started/stopped; a capture
+	// episode switch is refused while it is true. This is the enforceable form
+	// of "the audio thread has finished any in-flight publication".
+	processing: bool,
 
 	// Authoring values as last seen at a block boundary. These are copies of
 	// the adapter's parameter atomics, used only to detect configuration
@@ -224,6 +239,7 @@ meter_activate :: proc(meter: ^Meter, config: adapter.Activation_Config) -> bool
 	meter.last_block_frames = 0
 	meter.steady_initialized = false
 	meter.processed_segment = 0
+	meter.processing = false
 	meter_reset_analysis(meter)
 	return true
 }
@@ -576,14 +592,19 @@ meter_capture_enabled :: proc(meter: ^Meter) -> bool {
 }
 
 // meter_capture_set_enabled switches canonical record capture. It is a main
-// thread operation (the telemetry extension documents the same rule). Enabling
-// (or disabling) starts a fresh capture episode: pending records are discarded
-// and the dropped counter and capture validity are reset. The audio thread may
-// be producing at the instant of the switch; callers needing an exact boundary
-// should stop processing first. Live analysis is never affected.
-meter_capture_set_enabled :: proc(meter: ^Meter, enabled: bool) -> bool {
+// thread operation (the telemetry extension documents the same rule) and it
+// requires QUIESCENT processing: while a host has processing started, a
+// publication may be in flight and the episode reset would race it. The caller
+// must stop processing first; this function then returns .Busy and changes
+// nothing. Enabling (or disabling) starts a fresh capture episode: pending
+// records are discarded and the dropped counter and capture validity are reset.
+// Live analysis is never affected.
+meter_capture_set_enabled :: proc(meter: ^Meter, enabled: bool) -> Capture_Set_Result {
 	if meter == nil {
-		return false
+		return .Busy
+	}
+	if meter.processing {
+		return .Busy
 	}
 	// Stop production first so a concurrent push cannot race the queue reset.
 	sync.atomic_store_explicit(&meter.capture_enabled, 0, .Release)
@@ -597,7 +618,21 @@ meter_capture_set_enabled :: proc(meter: ^Meter, enabled: bool) -> bool {
 	if enabled {
 		sync.atomic_store_explicit(&meter.capture_enabled, 1, .Release)
 	}
-	return true
+	return .Ok
+}
+
+// meter_set_processing records the host's processing lifecycle. It is the
+// quiescence signal for capture episode switches. The CLAP adapter enforces the
+// same rule before forwarding the extension call; the standalone consumer calls
+// this directly.
+meter_set_processing :: proc(meter: ^Meter, active: bool) {
+	if meter != nil {
+		meter.processing = active
+	}
+}
+
+meter_is_processing :: proc(meter: ^Meter) -> bool {
+	return meter != nil && meter.processing
 }
 
 // meter_capture_valid is the capture-domain validity. It is true when capture

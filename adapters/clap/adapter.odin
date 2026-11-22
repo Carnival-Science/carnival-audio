@@ -1051,6 +1051,14 @@ telemetry_set_enabled :: proc "c" (plugin: ^clap.Plugin, enabled: bool) -> bool 
 	if !telemetry_on_main_thread(instance) {
 		return false
 	}
+	// Capture episodes require quiescent processing: start/stop_processing is
+	// the host's quiescence signal, and while it is held the audio thread may
+	// still be inside a publication. Refusing here is enforceable (the adapter
+	// owns the processing lifecycle) and avoids a toggle racing an in-flight
+	// push.
+	if instance.processing {
+		return false
+	}
 	return instance.definition.backend.telemetry.set_enabled(instance.data, enabled)
 }
 
