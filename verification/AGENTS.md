@@ -21,12 +21,15 @@ and Pulse share the FFT implementation, the comparison proves little. See
 
 ## Import boundary
 
-Allowed: core record-format declarations (measurement records, descriptors) and
-Odin `core:` packages.
+Allowed: core record-format declarations (measurement records, descriptors),
+the neutral `third_party/clap` ABI declarations, and Odin `core:` packages.
 
-Forbidden: `core/dsp`, `adapters/`, `products/`, Alicorn, CLAP, and platform
-audio/graphics libraries. `tools/check-boundary.ps1` enforces this in the
-`verification` scope.
+Forbidden: `core/dsp`, `adapters/`, `products/`, Alicorn, a CLAP implementation
+(`adapters/clap` or any plugin implementation), and platform audio/graphics
+libraries. Sharing the protocol declaration in `third_party/clap` is fine
+because verification acts as an independent host; sharing the DSP that computes
+expected values is not. `tools/check-boundary.ps1` enforces this in the
+`verification` scope, with an explicit exception for `third_party/clap`.
 
 ## Evidence
 

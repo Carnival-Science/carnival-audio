@@ -48,6 +48,9 @@ structural, not a convention:
 - verification imports core **record formats** only;
 - it never imports `core/dsp`, `adapters/` or `products/`, and never links
   Pulse DSP;
+- it **may** import the neutral `third_party/clap` ABI declarations: a host
+  must speak the same protocol as the plugin under test, but sharing a protocol
+  declaration is not sharing the implementation;
 - it does not share FFT, window, filter or measurement code with the thing it
   verifies;
 - every report names its reference, the reference's version, and how the
