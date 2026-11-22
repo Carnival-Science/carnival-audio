@@ -25,6 +25,21 @@ Alicorn strictly a UI/rendering/accessibility library.
 - [Program research audit](docs/research/program-audit-2026-11-22.md) —
   ecosystem findings, reuse-vs-build decisions, risk register.
 
+## Build and test
+
+Milestone 0 is a library plus headless tests; there is no executable yet.
+From the repository root (Windows PowerShell):
+
+```powershell
+.\tools\check-boundary.ps1   # core/ must not import Alicorn, SDL, miniaudio or CLAP
+.\tools\build.ps1            # odin check every package with -vet
+.\tools\test.ps1             # boundary gate + every package's @(test)s
+```
+
+The tools resolve Odin from `-Odin`, `PULSE_ODIN`, the local development path,
+or `PATH`. Packages import each other through the `pulse` collection, which the
+scripts point at the repository root (`-collection:pulse=.`).
+
 ## Status
 
 - Milestone 0 (source-independent audio analysis core): implemented
