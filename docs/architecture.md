@@ -98,12 +98,15 @@ The engine's intake contract is deliberately source-independent:
 | Consumer | Entry point | Clock | Discontinuity |
 | --- | --- | --- | --- |
 | CLAP (`products/pulse`) | `engine_push_passthrough` with planar input/output | host `steady_time`; a forward jump is a source gap | recorded by the transport ring; new continuity segment |
-| Capture (`products/pulse-mini`) | `engine_push_interleaved` | delivered frames (`steady_time < 0` advances by the block) | `engine_note_discontinuity` on stall/recovery; no fabricated silence |
+| Capture (`products/pulse-mini`) | `engine_push_interleaved` | delivered frames (`steady_time < 0` advances by the block) | `engine_note_discontinuity` on stall, device loss/recovery or capture-ring overrun (with the dropped range); no fabricated silence |
 
 Both accept variable-length blocks up to the activation maximum. Gaps never
-complete a window: the RMS window restarts at the post-gap absolute frame.
-`engine_note_discontinuity` also advances the analysis epoch; host steady-time
-gaps keep the existing epoch so Census labels and records stay unchanged.
+complete a window: the RMS window restarts at the post-gap absolute frame. The
+first completed window after the boundary is the affected window and is
+invalid; later contiguous windows are valid again. `engine_note_discontinuity`
+also advances the analysis epoch and publishes a snapshot immediately; host
+steady-time gaps keep the existing epoch so Census labels and records stay
+unchanged.
 
 ## Architectural destinations
 
@@ -180,6 +183,39 @@ and resampling are allowed. The contract is level accuracy, not bit equality;
 the self-loop test documents the measured deviation (about +0.001% on the
 development machine against a 1% tolerance).
 
+### Capture completeness, current validity and presentation
+
+An incomplete **historical** measurement must not make all **future**
+measurements invalid. A legitimate new analysis epoch can produce valid new
+data without pretending the earlier discontinuity never happened. The engine
+therefore keeps three contracts separate:
+
+1. **Historical capture completeness.** The transport ring and the engine keep
+   an append-only ledger of lost ranges and their reason (source gap, transport
+   overrun, stall, device loss/recovery, capture-ring overrun, rejected range).
+   The ledger is the record of what happened; it is never a latch on later
+   measurements. `engine_reset` starts a new epoch but does not erase it;
+   activation starts a fresh ledger.
+2. **Current measurement validity.** A canonical record is valid iff the audio
+   feeding *that window* was contiguous in *that* epoch. A discontinuity drops
+   the partial window (no window straddles the break) and marks the first
+   completed window after the boundary as the affected/boundary window. The
+   next contiguous window is valid again; no explicit reset is required.
+   `engine_note_discontinuity` publishes this state immediately.
+3. **Presentation state.** `Measurement_Snapshot` is latest-wins and carries
+   the current window validity, epoch and three distinct peak values:
+   `window_peak` (last completed analysis window), `peak_hold` (the hold/decay
+   envelope) and `session_max` (maximum since the current epoch began, reset on
+   an epoch bump). Reading a snapshot never affects canonical records.
+
+The capture adapter reports ring overflow as an explicit dropped-frame range
+(`Poll_Result.dropped_delta`) and the consumer calls
+`engine_note_discontinuity(..., .Capture_Overrun)` after pushing the delivered
+block that precedes the loss. Device loss calls
+`engine_note_discontinuity(..., .Device_Lost)` at the first lost poll, and
+recovery starts another explicit epoch; the last pre-loss reading is never
+presented as live.
+
 ### Transport continuity
 
 The transport ring keeps the source's absolute frame clock separate from queue
@@ -190,8 +226,11 @@ a duplicate rather than accepted twice. Each data block and gap record carries
 the continuity segment, so analysis that assembles a window across blocks must
 invalidate it when the segment changes or a ledger range overlaps it. There is
 no implicit gap accounting: recovery requires a reset or an explicit
-higher-layer account of the lost frames. Overrun and ledger-overflow are sticky
-latches. Variable-length host blocks are stored in slots preallocated at
+higher-layer account of the lost frames. The ring's overrun and ledger-overflow
+counters are sticky historical records of incomplete capture; the meter engine
+consumes them as ledger events, not as a sticky current-validity latch. A
+valid post-boundary window is therefore measurable again without a reset.
+Variable-length host blocks are stored in slots preallocated at
 `max_block_frames`; push/read never allocate.
 
 ## Remaining work (Milestone 0 review ledger)
@@ -408,8 +447,8 @@ pulse-mini.exe --input=loopback [--duration=N] [--print-cadence=Hz]
 
 The self-loop verification renders a known 400 Hz / 0.5 sine while capturing
 loopback, feeds the captured frames through the shared ring and engine, and
-checks the presentation snapshot: peak 0.500004 versus 0.5 (+0.001%), RMS
-0.353555 versus 1/(2√2) (+0.001%). The 1% tolerance is a level-accuracy
+checks the presentation snapshot: session maximum 0.500004 versus 0.5
+(+0.001%), RMS 0.353555 versus 1/(2√2) (+0.001%). The 1% tolerance is a level-accuracy
 contract for a shared-mode path that may mix, convert and resample; it is not a
 bit-equality claim. Device loss/recovery and idle stalls are covered by the
 fake-backend tests.
