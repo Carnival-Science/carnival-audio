@@ -1,0 +1,3 @@
+alicorn_diagnostics screenshot C:\Users\saman\AppData\Local\Temp\opencode\pulse-gui-final-live/20261123T031838.105Z-0001/screenshot.ppm
+pulse-mini: gui counters: snapshots_published=819 snapshots_consumed=785 frames=10 renders_skipped=783 hidden_wakes_suppressed=0 wakes=785 epoch=1 elapsed_ms=8381 final_state=LIVE
+SDL application PASS submissions 9 primary_gpu_submissions 9 retired 9 max_frames_in_flight 2 wall_ns 8416402400 startup_origin_unix_ns 1795403909846721300

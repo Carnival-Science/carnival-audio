@@ -1,0 +1,4 @@
+pulse-mini: window hidden at 2484ms: frames=6 published=237 consumed=220 hidden_wakes_suppressed=0
+pulse-mini: window visible at 8432ms: frames=6 published=832 consumed=238 hidden_wakes_suppressed=595
+alicorn_diagnostics screenshot C:\Users\saman\AppData\Local\Temp\opencode\pulse-gui-final-hidden/20261123T031917.031Z-0001/screenshot.ppm
+pulse-mini: gui counters: snapshots_published=1599 snapshots_consumed=995 frames=15 renders_skipped=991 hidden_wakes_suppressed=595 wakes=994 epoch=1 elapsed_ms=16143 final_state=LIVE
