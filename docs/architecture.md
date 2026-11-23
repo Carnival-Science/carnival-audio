@@ -208,6 +208,30 @@ therefore keeps three contracts separate:
    envelope) and `session_max` (maximum since the current epoch began, reset on
    an epoch bump). Reading a snapshot never affects canonical records.
 
+#### Pulse Mini's snapshot-to-visual mapping (M3.2a seed)
+
+The first graphical consumer keeps the presentation direction structural.
+`products/pulse-mini/presentation` is a pure function from a schema-2 snapshot
+plus a capture-lifecycle enum to a fixed-size `Visual` record: bar fractions
+over a documented −60…0 dBFS display range, level zones/colors, and one state
+(`Starting`, `Live`, `Idle`, `Disconnected`, `Invalid_Window`). It imports only
+`core/transport`, so the UI cannot reach analyser state, and it never computes
+peak, RMS, hold or session values: those arrive already published.
+
+State selection combines engine semantics with capture lifecycle:
+`Device_Lost` wins over everything (the last reading is never shown as live);
+no publication is `Starting`; an adapter stall is an explicit `Idle`; with data
+flowing, `valid` is `Live`; an invalid completed window with `overrun` is the
+boundary window after a gap (`Invalid_Window`), and later contiguous windows
+become valid without a reset.
+
+Presentation-on-demand is part of the contract seed: a new snapshot invalidates
+a frame only when the mapped visual changes beyond 0.25% of the display range
+(0.15 dB). Hidden windows elide both frames and capture wakeups; restoring
+forces one frame from the latest snapshot. This is a product-local seed, not a
+standardized visual API, and it is recorded here so a future second consumer can
+decide deliberately whether to promote it.
+
 The capture adapter reports ring overflow as an explicit dropped-frame range
 (`Poll_Result.dropped_delta`) and the consumer calls
 `engine_note_discontinuity(..., .Capture_Overrun)` after pushing the delivered
@@ -294,9 +318,14 @@ as solved guarantees:
   about +0.001% peak/RMS deviation on the development machine against a 1%
   tolerance. Shared-mode loopback is not bit-transparent; other endpoints,
   sample-rate conversions and process mixes may differ.
-- **pulse-mini is console-only.** The Alicorn UI, hidden/idle work elision and
-  presentation profiling are M3.2. The engine is already snapshot-driven, so
-  presentation cadence cannot change analysis results.
+- **pulse-mini GUI presentation is a seed, not a standard.** The graphical
+  Pulse Mini (M3.2a) maps schema-2 snapshots to bars, zones, colors and an
+  explicit state through `products/pulse-mini/presentation`. That mapping layer
+  is intentionally product-local and unversioned: it is the first consumer of
+  the presentation contract, not a shared visual API. It is tested in
+  isolation and must never compute a measurement; hidden/idle work elision is
+  verified by its counters and the native-host evidence, not by a cross-OS
+  benchmark.
 
 ## State separation: four distinct contracts
 

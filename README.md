@@ -58,7 +58,8 @@ products, so it cannot validate Pulse with Pulse's own math.
 | `adapters/clap` | `clap_adapter` | Generic CLAP lifecycle, params, authoring state, draft extensions | implemented (M1/M3) |
 | `adapters/wasapi` | `wasapi` | Shared-mode WASAPI loopback capture, ring, recovery | implemented (M3.1) |
 | `products/pulse` | `pulse` | Pulse headless CLAP meter binding | implemented (M1/M3.0) |
-| `products/pulse-mini` | `main` | Standalone Mini meter (console, loopback) | implemented (M3.1) |
+| `products/pulse-mini` | `main` | Standalone Mini meter: native Alicorn window + `--headless` console | implemented (M3.2a) |
+| `products/pulse-mini/presentation` | `presentation` | Pure snapshot-to-visual mapping (seed) | implemented (M3.2a) |
 | `tests` | `tests` | Integration tests: partitions, WAV round-trip, memory ceiling | implemented (M0) |
 | `products/reference` | per-plugin | Gain, biquad, delay + defective test fixtures | implemented (M2) |
 | `verification` | — | Independent A−1 host, worker, probes and census | implemented (M2) |
@@ -68,8 +69,8 @@ products, so it cannot validate Pulse with Pulse's own math.
 
 `adapters/clap`, `adapters/wasapi`, `products/pulse`, `products/pulse-mini`,
 `products/reference` and `verification/` exist through Milestone 3;
-`research/` and the Alicorn standalone/editor UI remain architectural
-destinations recorded in [docs/architecture.md](docs/architecture.md).
+`research/` and the embedded Alicorn editor remain architectural destinations
+recorded in [docs/architecture.md](docs/architecture.md).
 
 ## Documentation
 
@@ -81,8 +82,9 @@ destinations recorded in [docs/architecture.md](docs/architecture.md).
   params/state schema, measurement export, RT evidence and limits.
 - [Processing-checkpoint draft](docs/draft-processing-checkpoint.md) — the optional
   processing-checkpoint capability, separate from authoring state.
-- [Pulse Mini](docs/pulse-mini.md) — standalone loopback capture, CLI, idle
-  policy, self-loop measurements and tolerance rationale.
+- [Pulse Mini](docs/pulse-mini.md) — graphical Alicorn window, `--headless`
+  console mode, threading/counters, snapshot-to-visual mapping, idle policy,
+  self-loop measurements and tolerance rationale.
 - [Telemetry draft](docs/draft-telemetry-extension.md) — canonical measurement
   records through the real plugin binary.
 - [Milestone 1 validation](docs/benchmarks/clap-milestone1-validation-2026-11-22/README.md)
@@ -102,6 +104,7 @@ From the repository root:
 ```powershell
 .\tools\check-boundary.ps1    # core/, third_party/, adapters/, products/, verification/ boundaries
 .\tools\build.ps1             # odin check, out\pulse.clap, out\pulse-mini.exe, reference processors, worker
+.\tools\pulse-mini.ps1        # build the graphical product against an Alicorn checkout
 .\tools\test.ps1              # boundary gate + C ABI probes + every package's tests
 .\tools\run_verification.ps1  # A-1 census: fresh workers, evidence under verification\reports\
 ```
@@ -109,9 +112,15 @@ From the repository root:
 After building, the standalone meter can be run directly:
 
 ```powershell
-.\out\pulse-mini.exe --input=loopback --duration=5 --print-cadence=10
-.\out\pulse-mini.exe --input=loopback --duration=2 --self-loop
+.\out\pulse-mini.exe --self-loop                 # graphical window
+.\out\pulse-mini.exe --headless --input=loopback --duration=5 --print-cadence=10
+.\out\pulse-mini.exe --headless --input=loopback --duration=2 --self-loop
 ```
+
+Alicorn is a separate repository. `tools/pulse-mini.ps1` resolves
+`-AlicornRoot`, `PULSE_ALICORN_ROOT`, then `..\alicorn`; `tools/build.ps1` skips
+the graphical product with a notice when none is present. See the pin in
+[docs/pulse-mini.md](docs/pulse-mini.md).
 
 ```sh
 ./tools/test.sh              # same gates on Linux/macOS (requires pwsh for the boundary gate)
@@ -133,11 +142,14 @@ records is not yet claimed.
 - Milestone 2 (verification laboratory A‑1, #236): implemented
   (`verification/host`, `lab`, `worker`, scenarios, reference processors and a
   dated census). Evidence is local Windows x64; CI remains billing-blocked.
-- Milestone 3 (standalone Mini meter + embedded CLAP editor, #131): M3.0 and
-  M3.1 implemented. `core/meter` is the shared analysis engine, `adapters/wasapi`
-  captures shared-mode loopback with explicit stall/recovery discontinuities,
-  and `products/pulse-mini` is a functional console meter (self-loop verified).
-  The Alicorn UI, hidden/idle work elision and the embedded editor are M3.2.
+- Milestone 3 (standalone Mini meter + embedded CLAP editor, #131): M3.0, M3.1
+  and M3.2a implemented. `core/meter` is the shared analysis engine,
+  `adapters/wasapi` captures shared-mode loopback with explicit
+  stall/recovery discontinuities, and `products/pulse-mini` is now the first
+  graphical product: a native Alicorn window with stereo peak/RMS meters,
+  peak hold, session maximum, explicit disconnected/idle/invalid states and
+  presentation-on-demand counters. `--headless` preserves the console meter.
+  The embedded editor is the remaining M3.2 step.
 
 ## License
 
