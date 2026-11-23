@@ -1,24 +1,32 @@
 // Pulse Mini: the standalone capture meter (Milestone 3).
 //
-// capture device -> bounded ring -> core/meter engine -> revisioned snapshot
+// The graphical presentation is the default: a small always-on-top Alicorn
+// window that you can leave on the desktop. `--headless` preserves the M3.1
+// console meter, its flags and its output.
 //
-// Analysis is snapshot-driven: the engine analyses every delivered block and
-// publishes a latest-wins snapshot; the console prints at an independent
-// cadence. `--print-cadence` therefore cannot change measured values (only how
-// often a value is shown).
+// Pipeline (both modes):
+//
+//   capture device -> bounded ring -> core/meter engine -> revisioned snapshot
+//
+// Analysis runs on the capture cadence. The console prints and the window
+// present at independent cadences, and neither can change a measured value:
+// they only read the latest snapshot. The window's UI thread never computes a
+// measurement; `presentation` maps the published snapshot fields to bars,
+// colours and an explicit state.
 //
 // Usage:
-//   pulse-mini.exe --input=loopback [--duration=N] [--print-cadence=Hz]
-//                  [--window=FRAMES] [--self-loop]
+//   pulse-mini.exe [--input=loopback] [--self-loop] [--window=FRAMES]
+//                  [--duration=N] [--always-on-top|--no-always-on-top]
+//   pulse-mini.exe --headless [--print-cadence=Hz] [same capture flags]
 //
 // `--input=loopback` captures the default render endpoint in shared mode.
 // `--self-loop` additionally renders a documented 400 Hz / -6.02 dBFS sine so
 // the loopback has a known signal to measure (a functional smoke test).
 //
 // Idle loopback endpoints deliver no callbacks. Pulse Mini does not fabricate
-// silence: it prints an explicit stall, keeps the source clock where it was,
-// and starts a new analysis epoch when delivery resumes (see
-// docs/architecture.md).
+// silence: it shows an explicit idle/disconnected state, keeps the source
+// clock where it was, and starts a new analysis epoch when delivery resumes
+// (see docs/architecture.md and docs/pulse-mini.md).
 package main
 
 import "core:fmt"
@@ -26,31 +34,42 @@ import "core:os"
 import "core:strconv"
 import "core:time"
 
-import "carnival:core/meter"
 import "carnival:core/transport"
 
-import "carnival:adapters/wasapi"
-
-BUFFER_FRAMES :: 1024
-
+// Options are shared by the graphical and console presentations. The window
+// cadence is not a flag: the graphical mode is presentation-on-demand and
+// rebuilds only when the mapped snapshot changes beyond an epsilon.
 Options :: struct {
 	input:          string,
 	duration_s:     f64,
+	duration_set:   bool,
 	print_cadence:  f64,
 	window_frames:  int,
 	self_loop:      bool,
+	headless:       bool,
+	always_on_top:  bool,
 }
 
 parse_options :: proc() -> (Options, bool) {
 	options := Options{
 		input = "loopback",
-		duration_s = 5,
 		print_cadence = 10,
 		window_frames = 1024,
+		always_on_top = true,
 	}
 	for argument in os.args[1:] {
-		if argument == "--self-loop" {
+		switch argument {
+		case "--self-loop":
 			options.self_loop = true
+			continue
+		case "--headless":
+			options.headless = true
+			continue
+		case "--always-on-top":
+			options.always_on_top = true
+			continue
+		case "--no-always-on-top":
+			options.always_on_top = false
 			continue
 		}
 		key, value := split_flag(argument)
@@ -63,6 +82,7 @@ parse_options :: proc() -> (Options, bool) {
 				return options, false
 			}
 			options.duration_s = parsed
+			options.duration_set = true
 		case "--print-cadence":
 			parsed, ok := strconv.parse_f64(value)
 			if !ok || parsed <= 0 {
@@ -75,6 +95,14 @@ parse_options :: proc() -> (Options, bool) {
 				return options, false
 			}
 			options.window_frames = parsed
+		// The Alicorn native host parses the same command line. These are
+		// diagnostics/window-management flags owned by the host; pulse-mini
+		// accepts them so a run can enable a capture bundle without a second
+		// argument syntax.
+		case "--diagnostics", "--capture-dir", "--capture-after", "--idle-validation-seconds",
+			"--smoke-hold-ms", "--input-debug", "--deferred-system-fonts",
+			"--fallback-probe-after-first-frame":
+			continue
 		case "--help":
 			return options, false
 		case:
@@ -85,6 +113,11 @@ parse_options :: proc() -> (Options, bool) {
 	if options.input != "loopback" {
 		fmt.eprintf("pulse-mini: only --input=loopback is implemented in this milestone\n")
 		return options, false
+	}
+	if !options.duration_set {
+		// The console meter has always defaulted to a five-second run. The
+		// graphical product stays open until the user closes it.
+		options.duration_s = options.headless ? 5 : 0
 	}
 	return options, true
 }
@@ -99,8 +132,26 @@ split_flag :: proc(argument: string) -> (key, value: string) {
 }
 
 usage :: proc() {
-	fmt.eprintln("usage: pulse-mini --input=loopback [--duration=N] [--print-cadence=Hz] [--window=FRAMES] [--self-loop]")
+	fmt.eprintln("usage: pulse-mini [--input=loopback] [--self-loop] [--window=FRAMES] [--duration=N] [--always-on-top|--no-always-on-top]")
+	fmt.eprintln("       pulse-mini --headless [--print-cadence=Hz] [same capture flags]")
+	fmt.eprintln("       pulse-mini --help")
 }
+
+main :: proc() {
+	options, ok := parse_options()
+	if !ok {
+		usage()
+		os.exit(2)
+	}
+	if options.headless {
+		os.exit(run_headless(options))
+	}
+	run_graphical(options)
+}
+
+// ---------------------------------------------------------------------------
+// Console presentation (Milestone 3.1 behavior, unchanged)
+// ---------------------------------------------------------------------------
 
 print_snapshot :: proc(
 	snapshot: transport.Measurement_Snapshot,
@@ -126,183 +177,98 @@ print_snapshot :: proc(
 	)
 }
 
-main :: proc() {
-	options, ok := parse_options()
-	if !ok {
-		usage()
-		os.exit(2)
-	}
-
-	loopback: wasapi.Loopback
-	session: wasapi.Session
-	tone: wasapi.Tone
-	// Start the self-loop tone before opening the loopback endpoint: shared-mode
-	// WASAPI binds a loopback stream to the endpoint that is active when the
-	// stream starts, and a fresh playback device can otherwise be missed.
-	if options.self_loop {
-		if !wasapi.tone_start(&tone, 400, 0.5, 48000) {
+run_headless :: proc(options: Options) -> int {
+	capture: Capture_Session
+	if failure := capture_session_open(&capture, options.self_loop, options.window_frames); failure != .None {
+		switch failure {
+		case .Tone:
 			fmt.eprintln("pulse-mini: --self-loop requested but no playback device is available")
-			os.exit(2)
+		case .Engine, .Activation:
+			fmt.eprintln("pulse-mini: meter engine could not be activated")
+		case .None:
+			// Unreachable: the caller only enters this branch for a failure.
+		case .Session, .Start:
+			fmt.eprintln("pulse-mini: could not open WASAPI loopback on the default render endpoint")
 		}
+		return 2
 	}
-	// Odin's `defer` is scope-bound, so this must live in the procedure scope:
-	// placing it inside the `if` would stop the tone at the end of the block.
-	defer wasapi.tone_stop(&tone)
-	// 48 kHz is the requested rate; the device reports the negotiated rate in
-	// `session.info.sample_rate` and the engine is activated with that value.
-	if !wasapi.session_open(&session, wasapi.loopback_backend(&loopback), wasapi.Device_Config{
-		sample_rate = 48000,
-		channels = 2,
-		period_frames = 480,
-	}, 48000 * 2) {
-		fmt.eprintln("pulse-mini: could not open WASAPI loopback on the default render endpoint")
-		os.exit(2)
-	}
-	defer wasapi.session_close(&session)
-	if session.info.sample_rate == 0 {
-		session.info.sample_rate = 48000
-	}
-
-	engine := meter.engine_create()
-	if engine == nil {
-		fmt.eprintln("pulse-mini: engine allocation failed")
-		os.exit(2)
-	}
-	defer meter.engine_destroy(engine)
-	if !meter.engine_activate(engine, f64(session.info.sample_rate), 1024) {
-		fmt.eprintln("pulse-mini: engine activation failed")
-		os.exit(2)
-	}
-	parameters := meter.default_parameters()
-	parameters.window_frames = options.window_frames
-	meter.engine_set_parameters(engine, parameters)
-
-	if !wasapi.session_start(&session) {
-		fmt.eprintln("pulse-mini: loopback device did not start")
-		os.exit(2)
-	}
-	// The capture episode is live; mark the engine as processing so an episode
-	// switch would be refused if one were attempted.
-	meter.engine_set_processing(engine, true)
-	defer meter.engine_set_processing(engine, false)
+	defer capture_session_close(&capture)
 
 	fmt.printf(
 		"pulse-mini: loopback %d Hz, window %d frames, print %.1f Hz, duration %.1fs%s\n",
-		session.info.sample_rate,
+		capture.sample_rate,
 		options.window_frames,
 		options.print_cadence,
 		options.duration_s,
 		options.self_loop ? ", self-loop tone 400 Hz" : "",
 	)
 
-	buffer: [BUFFER_FRAMES * 2]f32
+	buffer: [CAPTURE_BUFFER_FRAMES * 2]f32
 	started := time.tick_now()
 	print_period_ns := i64(f64(time.Second) / options.print_cadence)
 	next_print_ns: i64 = 0
-	stall_reported := false
-	device_lost_noted := false
-	device_unavailable := false
-	delivered: u64 = 0
-	stalls := 0
-	recoveries := 0
-	overruns := 0
-	dropped: u64 = 0
 	timed_out := false
+	device_lost_printed := false
+	stall_printed := false
 
 	for {
 		elapsed_ns := time.duration_nanoseconds(time.tick_since(started))
 		if options.duration_s > 0 && f64(elapsed_ns) >= options.duration_s * f64(time.Second) {
 			break
 		}
-		poll := wasapi.session_poll(&session, buffer[:], BUFFER_FRAMES)
-		switch poll.reason {
-		case .Data:
-			if poll.resumed {
-				event := device_unavailable ? meter.Discontinuity_Event.Device_Recovered : meter.Discontinuity_Event.Stall
-				meter.engine_note_discontinuity(engine, 0, event)
-				recoveries += 1
-				fmt.println("pulse-mini: timeline discontinuity -> new analysis epoch")
-			}
-			device_unavailable = false
-			device_lost_noted = false
-			// The returned block predates any frames the ring dropped while the
-			// consumer was behind, so push it first and then close that epoch.
-			_ = meter.engine_push_interleaved(engine, buffer[:poll.frames * 2], poll.frames, -1)
-			delivered += u64(poll.frames)
-			if poll.dropped_delta > 0 {
-				// Capture-ring overflow: the source clock advanced by frames the
-				// engine never received. Record the dropped range as an explicit
-				// discontinuity so the affected window cannot look continuous.
-				meter.engine_note_discontinuity(engine, poll.dropped_delta, .Capture_Overrun)
-				overruns += 1
-				fmt.printf("pulse-mini: capture ring dropped %d frame(s) -> new analysis epoch\n",
-					poll.dropped_delta)
-			}
-			stall_reported = false
-		case .Idle:
-			if poll.dropped_delta > 0 {
-				meter.engine_note_discontinuity(engine, poll.dropped_delta, .Capture_Overrun)
-				overruns += 1
-				fmt.printf("pulse-mini: capture ring dropped %d frame(s) -> new analysis epoch\n",
-					poll.dropped_delta)
-			} else if poll.discontinuity {
-				meter.engine_note_discontinuity(engine, 0, .Stall)
-				stalls += 1
-			}
-			if !stall_reported {
-				fmt.println("pulse-mini: stalled (no loopback data; source clock does not advance)")
-				stall_reported = true
-			}
-		case .Recovered:
-			meter.engine_note_discontinuity(engine, 0, .Device_Recovered)
-			recoveries += 1
-			device_unavailable = false
-			device_lost_noted = false
-			fmt.println("pulse-mini: device recovered -> new analysis epoch")
-		case .Device_Lost:
-			if !device_lost_noted {
-				// Device loss is an epoch boundary: the last readings must never
-				// be presented as live. The engine publishes an invalid snapshot
-				// immediately, even while no audio arrives.
-				meter.engine_note_discontinuity(engine, 0, .Device_Lost)
-				device_lost_noted = true
-				device_unavailable = true
-				fmt.println("pulse-mini: device unavailable (retrying); no valid reading is shown")
-			}
-		case .Closed:
-			timed_out = true
+		notifications := capture_session_poll(&capture, buffer[:])
+		if .Resumed in notifications {
+			fmt.println("pulse-mini: timeline discontinuity -> new analysis epoch")
 		}
-		dropped = poll.dropped_frames
+		if .Overrun in notifications {
+			fmt.printf("pulse-mini: capture ring dropped %d frame(s) -> new analysis epoch\n",
+				capture.last_dropped_delta)
+		}
+		if .Stall in notifications && !stall_printed {
+			fmt.println("pulse-mini: stalled (no loopback data; source clock does not advance)")
+			stall_printed = true
+		}
+		if .Device_Lost in notifications && !device_lost_printed {
+			fmt.println("pulse-mini: device unavailable (retrying); no valid reading is shown")
+			device_lost_printed = true
+		}
+		if .Recovered in notifications {
+			fmt.println("pulse-mini: device recovered -> new analysis epoch")
+			device_lost_printed = false
+		}
+		// A delivered block clears the adapter's stall latch; allow the next
+		// stall to be reported again, matching the M3.1 console behavior.
+		if !capture.stall_reported { stall_printed = false }
+		if .Closed in notifications { timed_out = true }
 
 		if elapsed_ns >= next_print_ns {
-			print_snapshot(meter.engine_snapshot(engine), f64(elapsed_ns) / f64(time.Second), device_unavailable)
+			print_snapshot(capture_session_snapshot(&capture), f64(elapsed_ns) / f64(time.Second), capture.device_unavailable)
 			next_print_ns += print_period_ns
 			if next_print_ns < elapsed_ns {
 				next_print_ns = elapsed_ns + print_period_ns
 			}
 		}
-		if timed_out {
-			break
-		}
+		if timed_out { break }
 		time.sleep(time.Millisecond)
 	}
 
-	snapshot := meter.engine_snapshot(engine)
+	snapshot := capture_session_snapshot(&capture)
 	fmt.printf(
 		"pulse-mini: done: %d frames (%.3fs), epoch %d, %d stall break(s), %d recover(ies), " +
 		"%d overrun(s), %d dropped, session max %.1f/%.1f dBFS, final %s\n",
-		delivered,
-		f64(delivered) / f64(session.info.sample_rate),
+		capture.delivered,
+		f64(capture.delivered) / f64(capture.sample_rate),
 		snapshot.epoch,
-		stalls,
-		recoveries,
-		overruns,
-		dropped,
+		capture.stalls,
+		capture.recoveries,
+		capture.overruns,
+		capture.dropped,
 		f64(snapshot.session_max_db[0]),
 		f64(snapshot.session_max_db[1]),
 		snapshot.valid ? "valid" : "INVALID",
 	)
-	if delivered == 0 {
+	if capture.delivered == 0 {
 		fmt.println("pulse-mini: the loopback endpoint produced no data (it may be silent); use --self-loop to verify the path")
 	}
+	return 0
 }

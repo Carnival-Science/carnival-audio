@@ -60,12 +60,44 @@ function Get-PulsePackages {
     # Optional layers exist only after their milestone commit. Keeping the
     # discovery dynamic lets the CI harness land before those packages without
     # a dead path in the package list.
-    foreach ($optional in @('third_party/clap/abi', 'adapters/clap', 'adapters/wasapi', 'products/pulse')) {
+    foreach ($optional in @('third_party/clap/abi', 'adapters/clap', 'adapters/wasapi', 'products/pulse', 'products/pulse-mini/presentation')) {
         if (Test-Path -LiteralPath (Join-Path (Get-PulseRepoRoot) $optional) -PathType Container) {
             $packages += $optional
         }
     }
     return $packages
+}
+
+# Pulse Mini's graphical product needs an Alicorn checkout. Alicorn is a
+# separate repository (Carnival-Science/Alicorn); carnival-audio does not vendor
+# it. Resolution order: an explicit -AlicornRoot, PULSE_ALICORN_ROOT, then the
+# sibling `alicorn` directory. Returns $null when none is available, so headless
+# CI can still run the rest of the repository.
+function Resolve-PulseAlicornRoot {
+    param(
+        [AllowNull()]
+        [string]$Requested
+    )
+
+    $candidates = @()
+    if (-not [string]::IsNullOrWhiteSpace($Requested)) { $candidates += $Requested }
+    if (-not [string]::IsNullOrWhiteSpace($env:PULSE_ALICORN_ROOT)) { $candidates += $env:PULSE_ALICORN_ROOT }
+    $candidates += (Join-Path (Split-Path -Parent (Get-PulseRepoRoot)) 'alicorn')
+
+    foreach ($candidate in $candidates) {
+        if ([string]::IsNullOrWhiteSpace($candidate)) { continue }
+        if (-not (Test-Path -LiteralPath $candidate -PathType Container)) { continue }
+        $resolved = (Resolve-Path -LiteralPath $candidate).Path
+        # These files carry the pins this milestone needs: the native host and
+        # the beginner-facing run API. Tests and builds fail with a clear
+        # message if the checkout predates them.
+        $hostFile = Join-Path $resolved 'native\sdl_gpu\application_api.odin'
+        $runFile = Join-Path $resolved 'ui\run_native.odin'
+        if ((Test-Path -LiteralPath $hostFile -PathType Leaf) -and (Test-Path -LiteralPath $runFile -PathType Leaf)) {
+            return $resolved
+        }
+    }
+    return $null
 }
 
 # Verification reference processors. Each is its own DLL (one CLAP plugin per

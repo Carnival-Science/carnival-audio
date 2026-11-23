@@ -6,7 +6,8 @@
 # writes explicit multiply/add expressions and never calls an FMA intrinsic; see
 # docs/determinism.md.
 param(
-    [string]$Odin
+    [string]$Odin,
+    [string]$AlicornRoot
 )
 
 $ErrorActionPreference = 'Stop'
@@ -58,22 +59,27 @@ if ($LASTEXITCODE -ne 0) {
 }
 Write-Host "build: plugin ok"
 
-# Standalone Mini meter (Milestone 3.1): loopback capture -> meter engine ->
-# console snapshots. It is an ordinary exe, not a CLAP bundle.
-$miniPath = Join-Path $repoRoot 'out\pulse-mini.exe'
-Write-Host "check products/pulse-mini"
-& $Odin check (Join-Path $repoRoot 'products\pulse-mini') "-collection:carnival=$repoRoot" `
-    -vet -warnings-as-errors -no-entry-point
-if ($LASTEXITCODE -ne 0) {
-    exit $LASTEXITCODE
+# Standalone Mini meter (Milestone 3.2a): the pure snapshot-to-visual mapping
+# package has no UI dependency and is checked everywhere. The graphical product
+# itself needs a separate Alicorn checkout; build it when one is available and
+# skip it with a clear notice in headless CI.
+$presentationPath = Join-Path $repoRoot 'products\pulse-mini\presentation'
+if (Test-Path -LiteralPath $presentationPath -PathType Container) {
+    Write-Host "check products/pulse-mini/presentation"
+    & $Odin check $presentationPath "-collection:carnival=$repoRoot" -vet -warnings-as-errors -no-entry-point
+    if ($LASTEXITCODE -ne 0) {
+        exit $LASTEXITCODE
+    }
 }
-Write-Host "build pulse-mini $miniPath"
-& $Odin build (Join-Path $repoRoot 'products\pulse-mini') "-collection:carnival=$repoRoot" `
-    -out:$miniPath -o:minimal
-if ($LASTEXITCODE -ne 0) {
-    exit $LASTEXITCODE
+$resolvedAlicorn = Resolve-PulseAlicornRoot -Requested $AlicornRoot
+if ($null -ne $resolvedAlicorn) {
+    & "$PSScriptRoot\pulse-mini.ps1" -Odin $Odin -AlicornRoot $resolvedAlicorn
+    if ($LASTEXITCODE -ne 0) {
+        exit $LASTEXITCODE
+    }
+} else {
+    Write-Host "build: pulse-mini graphical product skipped (no Alicorn checkout; pass -AlicornRoot or set PULSE_ALICORN_ROOT)"
 }
-Write-Host "build: pulse-mini ok"
 
 # Reference processors and the verification worker. Building them here keeps a
 # single entry point for a local laboratory run.

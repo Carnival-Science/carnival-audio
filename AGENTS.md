@@ -97,13 +97,17 @@ here is extracted yet.
   `adapters/wasapi`) `vendor:miniaudio`; never imported by core/ or
   products-owned code except through the documented direction.
 - `products/` — `products/pulse` is the headless CLAP meter binding over
-  `core/meter`; `products/pulse-mini` (Milestone 3.1) is the standalone console
-  capture meter; the Alicorn UI/editor follows in M3.2.
+  `core/meter`; `products/pulse-mini` (Milestone 3.2a) is the standalone
+  capture meter: a native Alicorn window by default and the M3.1 console meter
+  under `--headless`. Its `products/pulse-mini/presentation` subpackage is a
+  pure snapshot-to-visual mapping (core/transport only). The Alicorn
+  standalone/editor gradient follows from this product.
   `products/reference/` holds gain, biquad and feedback-delay reference
   processors plus deliberately defective test-the-tester fixtures, built from
   the same adapter. `products/` may import `adapters/`, `core/` and
-  `third_party/clap`; only the future standalone/editor target may import
-  Alicorn.
+  `third_party/clap`; only `products/pulse-mini` may import Alicorn
+  (`alicorn:ui`, `alicorn:runtime`) and it must never import `verification/` or
+  a platform audio/UI backend directly. `core/meter` remains Alicorn-free.
 - `research/` — **architectural destination, not created yet.** Isolated
   execution research; no product or adapter imports.
 

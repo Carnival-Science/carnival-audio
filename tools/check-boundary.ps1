@@ -56,7 +56,14 @@ $scopes = @(
         Name    = 'products'
         Root    = Join-Path $repoRoot 'products'
         Pattern = '(?im)' + $importPrefix + '(?:alicorn[^"]*|vendor:(?:sdl3|miniaudio|wasapi|alsa|coreaudio)[^"]*|(?:carnival:)?verification/[^"]*)"'
-        Reason  = 'headless products/ may import adapters/, core/ and third_party/clap; this milestone must not import verification/, Alicorn or a platform UI/audio backend. (Alicorn becomes allowed only for the standalone/editor product in Milestone 3.)'
+        # The standalone graphical product is the documented exception in
+        # AGENTS.md: it may import Alicorn UI/runtime, because it is the
+        # product, not the analysis core. It still may not import a platform
+        # audio/UI backend directly or verification/.
+        Exempt_Path    = '^products[\\/]pulse-mini[\\/]'
+        Exempt_Pattern = '(?im)' + $importPrefix + '(?:vendor:(?:sdl3|miniaudio|wasapi|alsa|coreaudio)[^"]*|(?:carnival:)?verification/[^"]*)"'
+        Reason  = 'headless products/ may import adapters/, core/ and third_party/clap; they must not import verification/, Alicorn or a platform UI/audio backend.'
+        Exempt_Reason = 'products/pulse-mini may import Alicorn UI/runtime (the standalone product), but never verification/, a platform UI/audio backend or core/dsp internals.'
     }
 )
 
@@ -70,14 +77,22 @@ foreach ($scope in $scopes) {
     }
     $files = @(Get-ChildItem -LiteralPath $scope.Root -Recurse -File -Filter '*.odin')
     $found = @()
+    $reasons = @{}
     foreach ($file in $files) {
-        $matches = Select-String -LiteralPath $file.FullName -Pattern $scope.Pattern
+        $relative = $file.FullName.Substring($repoRoot.Length + 1).Replace('\', '/')
+        $pattern = $scope.Pattern
+        $reason = $scope.Reason
+        if ($scope.ContainsKey('Exempt_Path') -and $relative -match $scope.Exempt_Path) {
+            $pattern = $scope.Exempt_Pattern
+            $reason = $scope.Exempt_Reason
+        }
+        $matches = Select-String -LiteralPath $file.FullName -Pattern $pattern
         foreach ($match in $matches) {
             if ($scope.ContainsKey('Allow') -and $match.Line -match $scope.Allow) {
                 continue
             }
-            $relative = $file.FullName.Substring($repoRoot.Length + 1)
             $found += "${relative}:$($match.LineNumber): $($match.Line.Trim())"
+            $reasons[$reason] = $true
         }
     }
     if ($found.Count -gt 0) {
@@ -85,7 +100,9 @@ foreach ($scope in $scopes) {
         foreach ($violation in $found) {
             Write-Host "  $violation"
         }
-        Write-Host $scope.Reason -ForegroundColor Red
+        foreach ($reason in $reasons.Keys) {
+            Write-Host $reason -ForegroundColor Red
+        }
         $failed = $true
     }
     $counts += "$($files.Count) $($scope.Name) files"
