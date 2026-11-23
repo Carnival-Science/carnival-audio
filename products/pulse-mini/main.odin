@@ -102,20 +102,27 @@ usage :: proc() {
 	fmt.eprintln("usage: pulse-mini --input=loopback [--duration=N] [--print-cadence=Hz] [--window=FRAMES] [--self-loop]")
 }
 
-print_snapshot :: proc(snapshot: transport.Measurement_Snapshot, elapsed_s: f64) {
+print_snapshot :: proc(
+	snapshot: transport.Measurement_Snapshot,
+	elapsed_s: f64,
+	device_unavailable: bool,
+) {
 	fmt.printf(
-		"t=%6.2fs frm=%-9d epoch=%d L[%6.1f/%6.1f/%6.1f dBFS] R[%6.1f/%6.1f/%6.1f dBFS] %s%s\n",
+		"t=%6.2fs frm=%-9d epoch=%d L[win %6.1f hold %6.1f max %6.1f rms %6.1f dBFS] " +
+		"R[win %6.1f hold %6.1f max %6.1f rms %6.1f dBFS] %s%s\n",
 		elapsed_s,
 		snapshot.frame,
 		snapshot.epoch,
-		f64(snapshot.peak_db[0]),
+		f64(snapshot.window_peak_db[0]),
+		f64(snapshot.peak_hold_db[0]),
+		f64(snapshot.session_max_db[0]),
 		f64(snapshot.rms_db[0]),
-		f64(snapshot.hold_db[0]),
-		f64(snapshot.peak_db[1]),
+		f64(snapshot.window_peak_db[1]),
+		f64(snapshot.peak_hold_db[1]),
+		f64(snapshot.session_max_db[1]),
 		f64(snapshot.rms_db[1]),
-		f64(snapshot.hold_db[1]),
 		snapshot.valid ? "valid" : "INVALID",
-		snapshot.overrun ? " (audio discontinuity)" : "",
+		device_unavailable ? " (device unavailable)" : (snapshot.overrun ? " (audio discontinuity)" : ""),
 	)
 }
 
@@ -193,9 +200,12 @@ main :: proc() {
 	print_period_ns := i64(f64(time.Second) / options.print_cadence)
 	next_print_ns: i64 = 0
 	stall_reported := false
+	device_lost_noted := false
+	device_unavailable := false
 	delivered: u64 = 0
 	stalls := 0
 	recoveries := 0
+	overruns := 0
 	dropped: u64 = 0
 	timed_out := false
 
@@ -207,17 +217,36 @@ main :: proc() {
 		poll := wasapi.session_poll(&session, buffer[:], BUFFER_FRAMES)
 		switch poll.reason {
 		case .Data:
-			if poll.discontinuity {
-				meter.engine_note_discontinuity(engine, 0)
+			if poll.resumed {
+				event := device_unavailable ? meter.Discontinuity_Event.Device_Recovered : meter.Discontinuity_Event.Stall
+				meter.engine_note_discontinuity(engine, 0, event)
 				recoveries += 1
 				fmt.println("pulse-mini: timeline discontinuity -> new analysis epoch")
 			}
+			device_unavailable = false
+			device_lost_noted = false
+			// The returned block predates any frames the ring dropped while the
+			// consumer was behind, so push it first and then close that epoch.
 			_ = meter.engine_push_interleaved(engine, buffer[:poll.frames * 2], poll.frames, -1)
 			delivered += u64(poll.frames)
+			if poll.dropped_delta > 0 {
+				// Capture-ring overflow: the source clock advanced by frames the
+				// engine never received. Record the dropped range as an explicit
+				// discontinuity so the affected window cannot look continuous.
+				meter.engine_note_discontinuity(engine, poll.dropped_delta, .Capture_Overrun)
+				overruns += 1
+				fmt.printf("pulse-mini: capture ring dropped %d frame(s) -> new analysis epoch\n",
+					poll.dropped_delta)
+			}
 			stall_reported = false
 		case .Idle:
-			if poll.discontinuity {
-				meter.engine_note_discontinuity(engine, 0)
+			if poll.dropped_delta > 0 {
+				meter.engine_note_discontinuity(engine, poll.dropped_delta, .Capture_Overrun)
+				overruns += 1
+				fmt.printf("pulse-mini: capture ring dropped %d frame(s) -> new analysis epoch\n",
+					poll.dropped_delta)
+			} else if poll.discontinuity {
+				meter.engine_note_discontinuity(engine, 0, .Stall)
 				stalls += 1
 			}
 			if !stall_reported {
@@ -225,13 +254,20 @@ main :: proc() {
 				stall_reported = true
 			}
 		case .Recovered:
-			meter.engine_note_discontinuity(engine, 0)
+			meter.engine_note_discontinuity(engine, 0, .Device_Recovered)
 			recoveries += 1
+			device_unavailable = false
+			device_lost_noted = false
 			fmt.println("pulse-mini: device recovered -> new analysis epoch")
 		case .Device_Lost:
-			if !stall_reported {
+			if !device_lost_noted {
+				// Device loss is an epoch boundary: the last readings must never
+				// be presented as live. The engine publishes an invalid snapshot
+				// immediately, even while no audio arrives.
+				meter.engine_note_discontinuity(engine, 0, .Device_Lost)
+				device_lost_noted = true
+				device_unavailable = true
 				fmt.println("pulse-mini: device unavailable (retrying); no valid reading is shown")
-				stall_reported = true
 			}
 		case .Closed:
 			timed_out = true
@@ -239,7 +275,7 @@ main :: proc() {
 		dropped = poll.dropped_frames
 
 		if elapsed_ns >= next_print_ns {
-			print_snapshot(meter.engine_snapshot(engine), f64(elapsed_ns) / f64(time.Second))
+			print_snapshot(meter.engine_snapshot(engine), f64(elapsed_ns) / f64(time.Second), device_unavailable)
 			next_print_ns += print_period_ns
 			if next_print_ns < elapsed_ns {
 				next_print_ns = elapsed_ns + print_period_ns
@@ -253,13 +289,17 @@ main :: proc() {
 
 	snapshot := meter.engine_snapshot(engine)
 	fmt.printf(
-		"pulse-mini: done: %d frames (%.3fs), epoch %d, %d stall break(s), %d recover(ies), %d dropped, final %s\n",
+		"pulse-mini: done: %d frames (%.3fs), epoch %d, %d stall break(s), %d recover(ies), " +
+		"%d overrun(s), %d dropped, session max %.1f/%.1f dBFS, final %s\n",
 		delivered,
 		f64(delivered) / f64(session.info.sample_rate),
 		snapshot.epoch,
 		stalls,
 		recoveries,
+		overruns,
 		dropped,
+		f64(snapshot.session_max_db[0]),
+		f64(snapshot.session_max_db[1]),
 		snapshot.valid ? "valid" : "INVALID",
 	)
 	if delivered == 0 {

@@ -197,7 +197,17 @@ Poll_Result :: struct {
 	frames:         int,
 	reason:         Poll_Reason,
 	discontinuity:  bool,
+	// resumed means this data follows a reported idle stall. Overflow is
+	// reported separately because dropped frames are newer than the frames
+	// returned by this poll: the consumer must push the delivered block before
+	// starting the post-overflow epoch.
+	resumed:        bool,
+	// dropped_frames is the cumulative ring drop count. dropped_delta is the
+	// frames dropped since the previous poll: the amount the source clock
+	// advanced without delivery, which must be propagated to the meter engine
+	// as an explicit discontinuity range.
 	dropped_frames: u64,
+	dropped_delta:  u64,
 }
 
 Session :: struct {
@@ -212,6 +222,7 @@ Session :: struct {
 	idle_threshold_ns: i64,
 	last_data_ns:      i64,
 	stalled:           bool,
+	reported_dropped:  u64,
 	open_attempts:     u64,
 	recoveries:        u64,
 }
@@ -266,6 +277,7 @@ session_start :: proc(session: ^Session, now_ns: i64 = -1) -> bool {
 		return true
 	}
 	ring_reset(&session.ring)
+	session.reported_dropped = 0
 	if !session.backend.start(session.backend.ctx) {
 		session.state = Session_State.Lost
 		return false
@@ -329,6 +341,7 @@ session_poll :: proc(
 		session.stalled = false
 		session.epoch += 1
 		ring_reset(&session.ring)
+		session.reported_dropped = 0
 		session.open_attempts += 1
 		reopened := session.backend.open(session.backend.ctx, &session.ring, session.config, &session.info) &&
 			session.backend.start(session.backend.ctx)
@@ -347,6 +360,7 @@ session_poll :: proc(
 		session.backend.close(session.backend.ctx)
 		session.open_attempts += 1
 		ring_reset(&session.ring)
+		session.reported_dropped = 0
 		if session.backend.open(session.backend.ctx, &session.ring, session.config, &session.info) &&
 			session.backend.start(session.backend.ctx) {
 			session.state = Session_State.Running
@@ -361,8 +375,15 @@ session_poll :: proc(
 		return Poll_Result{reason = .Closed}
 	}
 
-	frames := ring_read(&session.ring, destination, max_frames)
+	// The producer may have dropped frames since the previous poll. The source
+	// clock advanced but the frames are gone: report them as an explicit range
+	// rather than silently stitching the delivered blocks together.
 	dropped := ring_dropped(&session.ring)
+	dropped_delta := dropped - session.reported_dropped
+	if dropped_delta > 0 {
+		session.reported_dropped = dropped
+	}
+	frames := ring_read(&session.ring, destination, max_frames)
 	if frames > 0 {
 		resumed := session.stalled
 		session.stalled = false
@@ -371,8 +392,10 @@ session_poll :: proc(
 		return Poll_Result{
 			frames = frames,
 			reason = .Data,
-			discontinuity = resumed,
+			discontinuity = resumed || dropped_delta > 0,
+			resumed = resumed,
 			dropped_frames = dropped,
+			dropped_delta = dropped_delta,
 		}
 	}
 	if !session.stalled && now - session.last_data_ns >= session.idle_threshold_ns {
@@ -380,7 +403,12 @@ session_poll :: proc(
 		// inject silence: report one explicit timeline break.
 		session.stalled = true
 		session.epoch += 1
-		return Poll_Result{reason = .Idle, discontinuity = true, dropped_frames = dropped}
+		return Poll_Result{
+			reason = .Idle,
+			discontinuity = true,
+			dropped_frames = dropped,
+			dropped_delta = dropped_delta,
+		}
 	}
-	return Poll_Result{reason = .Idle, dropped_frames = dropped}
+	return Poll_Result{reason = .Idle, dropped_frames = dropped, dropped_delta = dropped_delta}
 }

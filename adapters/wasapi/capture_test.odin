@@ -213,6 +213,157 @@ test_session_device_loss_recovers_with_new_epoch :: proc(t: ^testing.T) {
 	testing.expect(t, result.discontinuity, "retry recovery reports the break")
 }
 
+@(test)
+test_capture_overflow_reaches_engine_as_a_dropped_range :: proc(t: ^testing.T) {
+	fake := Fake{}
+	session: Session
+	testing.expect(t, session_open(&session, fake_backend(&fake), Device_Config{sample_rate = 48000, channels = 2}, 64), "open")
+	defer session_close(&session)
+	testing.expect(t, session_start(&session, 0), "start")
+
+	engine := meter.engine_create()
+	defer meter.engine_destroy(engine)
+	testing.expect(t, meter.engine_activate(engine, 48000, 64), "engine activate")
+	parameters := meter.default_parameters()
+	parameters.window_frames = 64
+	parameters.hold_frames = 0
+	parameters.hold_decay_enabled = false
+	meter.engine_set_parameters(engine, parameters)
+	_ = meter.engine_capture_set_enabled(engine, true)
+
+	signal: [64 * 2]f32
+	destination: [64 * 2]f32
+	for index in 0 ..< len(signal) {
+		signal[index] = index % 2 == 0 ? f32(0.25) : f32(-0.125)
+	}
+	// One contiguous block establishes a valid window.
+	testing.expect_value(t, ring_write(&session.ring, signal[:], 64), 64)
+	poll := session_poll(&session, destination[:], 64, 10)
+	testing.expect_value(t, poll.frames, 64)
+	_ = meter.engine_push_interleaved(engine, destination[:poll.frames * 2], poll.frames, -1)
+	buffer: [8]meter.Measurement_Record
+	_ = meter.engine_measurement_drain(engine, buffer[:])
+
+	// The producer queues 64 frames, then drops a 32-frame block because the
+	// consumer has not drained the ring yet.
+	testing.expect_value(t, ring_write(&session.ring, signal[:], 32), 32)
+	testing.expect_value(t, ring_write(&session.ring, signal[:], 32), 32)
+	testing.expect_value(t, ring_write(&session.ring, signal[:], 32), 0)
+	testing.expect_value(t, ring_dropped(&session.ring), u64(32))
+	poll = session_poll(&session, destination[:], 64, 20)
+	testing.expect_value(t, poll.frames, 64)
+	testing.expect_value(t, poll.dropped_delta, u64(32))
+	testing.expect(t, poll.discontinuity && !poll.resumed,
+		"overflow is a discontinuity but not a resumed stall")
+	// Delivered frames predate the dropped block: push them, drain their
+	// records, then close the epoch with the dropped range.
+	_ = meter.engine_push_interleaved(engine, destination[:poll.frames * 2], poll.frames, -1)
+	_ = meter.engine_measurement_drain(engine, buffer[:])
+	meter.engine_note_discontinuity(engine, poll.dropped_delta, .Capture_Overrun)
+	testing.expect_value(t, meter.engine_discontinuity_count(engine), 1)
+	event, ok := meter.engine_discontinuity_at(engine, 0)
+	testing.expect(t, ok && event.event == .Capture_Overrun && event.frames == 32,
+		"the engine ledger records the dropped range")
+	noted := meter.engine_snapshot(engine)
+	testing.expect(t, !noted.valid && noted.overrun, "overflow publishes an invalid snapshot")
+
+	// The next window is the affected boundary window; the following one is
+	// valid again with no manual reset.
+	testing.expect_value(t, ring_write(&session.ring, signal[:], 64), 64)
+	poll = session_poll(&session, destination[:], 64, 30)
+	testing.expect_value(t, poll.frames, 64)
+	_ = meter.engine_push_interleaved(engine, destination[:poll.frames * 2], poll.frames, -1)
+	testing.expect_value(t, ring_write(&session.ring, signal[:], 64), 64)
+	poll = session_poll(&session, destination[:], 64, 40)
+	testing.expect_value(t, poll.frames, 64)
+	_ = meter.engine_push_interleaved(engine, destination[:poll.frames * 2], poll.frames, -1)
+
+	count := meter.engine_measurement_drain(engine, buffer[:])
+	testing.expect_value(t, count, 2)
+	testing.expect(t, !buffer[0].valid && buffer[0].overrun,
+		"the affected window after overflow is invalid")
+	testing.expect(t, buffer[1].valid && !buffer[1].overrun,
+		"the next window is valid without a reset")
+	recovered := meter.engine_snapshot(engine)
+	testing.expect(t, recovered.valid && !recovered.overrun,
+		"presentation recovers after the affected window")
+}
+
+@(test)
+test_device_loss_reaches_engine_then_recovery_starts_a_valid_epoch :: proc(t: ^testing.T) {
+	fake := Fake{}
+	session: Session
+	testing.expect(t, session_open(&session, fake_backend(&fake), Device_Config{sample_rate = 48000, channels = 2}, 256), "open")
+	defer session_close(&session)
+	testing.expect(t, session_start(&session, 0), "start")
+
+	engine := meter.engine_create()
+	defer meter.engine_destroy(engine)
+	testing.expect(t, meter.engine_activate(engine, 48000, 64), "engine activate")
+	parameters := meter.default_parameters()
+	parameters.window_frames = 64
+	parameters.hold_frames = 0
+	parameters.hold_decay_enabled = false
+	meter.engine_set_parameters(engine, parameters)
+	_ = meter.engine_capture_set_enabled(engine, true)
+
+	signal: [64 * 2]f32
+	destination: [64 * 2]f32
+	buffer: [8]meter.Measurement_Record
+	for index in 0 ..< len(signal) {
+		signal[index] = index % 2 == 0 ? f32(0.5) : f32(-0.25)
+	}
+	for _ in 0 ..< 2 {
+		testing.expect_value(t, ring_write(&session.ring, signal[:], 64), 64)
+		poll := session_poll(&session, destination[:], 64, 10)
+		testing.expect_value(t, poll.frames, 64)
+		_ = meter.engine_push_interleaved(engine, destination[:poll.frames * 2], poll.frames, -1)
+	}
+	_ = meter.engine_measurement_drain(engine, buffer[:])
+	live := meter.engine_snapshot(engine)
+	testing.expect(t, live.valid, "valid signal before device loss")
+	epoch_before := live.epoch
+
+	// The endpoint disappears and the first reopen attempt fails: the session
+	// reports Device_Lost, not a stale running state.
+	fake.lost_flag = true
+	fake.fail_open = true
+	lost := session_poll(&session, destination[:], 64, 100)
+	testing.expect_value(t, lost.reason, Poll_Reason.Device_Lost)
+	testing.expect(t, lost.discontinuity, "device loss is a discontinuity")
+	meter.engine_note_discontinuity(engine, 0, .Device_Lost)
+	offline := meter.engine_snapshot(engine)
+	testing.expect(t, offline.epoch > epoch_before, "device loss bumps the engine epoch")
+	testing.expect(t, !offline.valid && offline.overrun && !offline.window_valid,
+		"device loss immediately invalidates the presentation")
+	testing.expect_value(t, offline.session_max[0], f32(0))
+
+	// A later poll reopens the endpoint into a new epoch. Fresh contiguous data
+	// produces the affected window and then valid windows again.
+	fake.fail_open = false
+	fake.lost_flag = false
+	recovered := session_poll(&session, destination[:], 64, 200)
+	testing.expect_value(t, recovered.reason, Poll_Reason.Recovered)
+	testing.expect(t, recovered.discontinuity, "recovery is an epoch boundary")
+	meter.engine_note_discontinuity(engine, 0, .Device_Recovered)
+	recovery_epoch := engine.epoch
+	testing.expect(t, recovery_epoch > offline.epoch, "recovery starts another new epoch")
+
+	for _ in 0 ..< 2 {
+		testing.expect_value(t, ring_write(&session.ring, signal[:], 64), 64)
+		poll := session_poll(&session, destination[:], 64, 300)
+		testing.expect_value(t, poll.frames, 64)
+		_ = meter.engine_push_interleaved(engine, destination[:poll.frames * 2], poll.frames, -1)
+	}
+	count := meter.engine_measurement_drain(engine, buffer[:])
+	testing.expect_value(t, count, 2)
+	testing.expect(t, !buffer[0].valid, "first post-recovery window is the affected window")
+	testing.expect(t, buffer[1].valid, "later post-recovery windows are valid")
+	testing.expect_value(t, buffer[1].epoch, recovery_epoch)
+	resumed := meter.engine_snapshot(engine)
+	testing.expect(t, resumed.valid, "live presentation resumes in the new epoch")
+}
+
 // ---------------------------------------------------------------------------
 // Shared engine pipeline, no allocation
 // ---------------------------------------------------------------------------
@@ -338,7 +489,7 @@ test_loopback_self_loop_matches_closed_form :: proc(t: ^testing.T) {
 	snapshot := meter.engine_snapshot(engine)
 	expected_peak := f64(0.5)
 	expected_rms := 0.5 / math.sqrt(2.0)
-	peak := f64(max(snapshot.peak[0], snapshot.peak[1]))
+	peak := f64(max(snapshot.session_max[0], snapshot.session_max[1]))
 	rms := f64(max(snapshot.rms[0], snapshot.rms[1]))
 	peak_error := math.abs(peak - expected_peak) / expected_peak
 	rms_error := math.abs(rms - expected_rms) / expected_rms
