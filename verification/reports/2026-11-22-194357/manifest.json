@@ -1,0 +1,321 @@
+{
+    "schema":  "carnival.verification.manifest/1",
+    "lab_revision":  "m2.0",
+    "abi":  "clap-1.2.10",
+    "command":  ".\\tools\\run_verification.ps1",
+    "environment":  {
+                        "timestamp_local":  "2026-11-22T19:43:57.9007620-06:00",
+                        "platform":  "windows",
+                        "arch":  "X64",
+                        "os_description":  "Microsoft Windows 10.0.19045 ",
+                        "cpu":  "AMD Ryzen 5 7600X 6-Core Processor",
+                        "logical_processors":  12,
+                        "odin_version":  "C:\\odin\\odin.exe version dev-2026-11-nightly:08539cd",
+                        "git_commit":  "3178515d0ef9242a287c1f2b33939737ee96335b",
+                        "git_dirty":  true,
+                        "ci_status":  "local Windows x64; CI is billing-blocked",
+                        "numeric_environment":  "observed, not hermetic: FTZ/DAZ and FMA contraction are probed per worker run"
+                    },
+    "tool_hashes":  {
+                        "worker_sha256":  "e49432774d4bd5763d4d196c233b03ba122e2988e0c27e47113a3409df2c4715",
+                        "odin":  "C:\\odin\\odin.exe"
+                    },
+    "specimens":  [
+                      {
+                          "name":  "pulse",
+                          "class":  "product",
+                          "plugin":  "out/pulse.clap",
+                          "plugin_sha256":  "4903bcbaa9f5201b5ea92013ad001921030cfe814e6a8e92ac8cc13a506704e8",
+                          "scenario":  "verification/scenarios/pulse.json",
+                          "scenario_sha256":  "cde970dbd8d69e9ba8a63ed702414c9bd3251f333edb97c8583548292d077510",
+                          "expected_failures":  [
+
+                                                ],
+                          "expected_classes":  {
+                                                   "automation":  "automation_partition_sensitive_control_rate"
+                                               },
+                          "note":  "Canonical records are verified against verification-local peak/RMS; automation is control-rate."
+                      },
+                      {
+                          "name":  "gain",
+                          "class":  "reference",
+                          "plugin":  "out/reference/gain.clap",
+                          "plugin_sha256":  "876dd407a6af2d0dfb72d000f9cecaebe99efcab1a0777a961fd8de3e453ebea",
+                          "scenario":  "verification/scenarios/gain.json",
+                          "scenario_sha256":  "9b0e680dc5dda3b8fa7e5f144226c9886df2d2802657de09be790c957ed177c5",
+                          "expected_failures":  [
+
+                                                ],
+                          "expected_classes":  {
+                                                   "partition":  "static_partition_invariant",
+                                                   "automation":  "automation_partition_sensitive_control_rate"
+                                               },
+                          "note":  "Stateless exact multiply."
+                      },
+                      {
+                          "name":  "biquad",
+                          "class":  "reference",
+                          "plugin":  "out/reference/biquad.clap",
+                          "plugin_sha256":  "a48ce533f0d82e0609f578b09cda4b5981d027b1722a0cadec3095d98772bae7",
+                          "scenario":  "verification/scenarios/biquad.json",
+                          "scenario_sha256":  "a7a584cca7897c90d4e849fdc9e5ec8751491bbfde20c6301a9108af86e03e09",
+                          "expected_failures":  [
+
+                                                ],
+                          "expected_classes":  {
+                                                   "partition":  "static_partition_invariant",
+                                                   "automation":  "automation_partition_sensitive_control_rate",
+                                                   "checkpoint":  "processing_checkpoint_restore"
+                                               },
+                          "note":  "Per-sample direct-form-I state; coefficient automation is block-quantized; filter history is a processing checkpoint."
+                      },
+                      {
+                          "name":  "delay",
+                          "class":  "reference",
+                          "plugin":  "out/reference/delay.clap",
+                          "plugin_sha256":  "e6e4bd35034c1539f520e5d7f082231a9797e57c47e2474efb33df37f95d7513",
+                          "scenario":  "verification/scenarios/delay.json",
+                          "scenario_sha256":  "6e367cedf291c369f24b66cfc7de9091150961735858dc977e03dee35f412e9a",
+                          "expected_failures":  [
+
+                                                ],
+                          "expected_classes":  {
+                                                   "partition":  "static_partition_invariant",
+                                                   "automation":  "automation_partition_sensitive_control_rate",
+                                                   "checkpoint":  "processing_checkpoint_restore"
+                                               },
+                          "note":  "Per-sample delay line; processing checkpoint restores the delay line (authoring state stays schema 3)."
+                      },
+                      {
+                          "name":  "block_smoother",
+                          "class":  "defective",
+                          "plugin":  "out/reference/block_smoother.clap",
+                          "plugin_sha256":  "9f16b9763dd1b51c337050b2342d2972dec6d56893a1d42e143ad6920e4a0ac5",
+                          "scenario":  "verification/scenarios/block_smoother.json",
+                          "scenario_sha256":  "f5971f5c33b964b63d10aa66d974aa13fbc56f2617a37709833057412b160822",
+                          "expected_failures":  [
+                                                    "partition"
+                                                ],
+                          "expected_classes":  {
+
+                                               },
+                          "note":  "Intentionally partition-sensitive: the static partition probe must fail."
+                      },
+                      {
+                          "name":  "leaky_delay",
+                          "class":  "defective",
+                          "plugin":  "out/reference/leaky_delay.clap",
+                          "plugin_sha256":  "e4e5c2f89d62d00b30642e8baa4a8e9b42296ec865669b9d72ad70bb3a3f03f8",
+                          "scenario":  "verification/scenarios/leaky_delay.json",
+                          "scenario_sha256":  "452ef94163528a593fb1360cc238d2f9c0a9f82dd063804c35f80857aea44409",
+                          "expected_failures":  [
+                                                    "checkpoint"
+                                                ],
+                          "expected_classes":  {
+                                                   "partition":  "static_partition_invariant",
+                                                   "checkpoint":  "processing_checkpoint_restore",
+                                                   "state":  "authoring_state_and_migration"
+                                               },
+                          "note":  "Authoring state restores parameters (PASSES); the processing checkpoint claims support but omits the delay line, so the checkpoint probe must fail."
+                      },
+                      {
+                          "name":  "nan_trigger",
+                          "class":  "defective",
+                          "plugin":  "out/reference/nan_trigger.clap",
+                          "plugin_sha256":  "cedfedf9ee3f214edde3105a1fac5ac8ded1d6ad746af4efd437a7ed64bea6f3",
+                          "scenario":  "verification/scenarios/nan_trigger.json",
+                          "scenario_sha256":  "5a5fec812a5ab31b14a4b7bd50e395ace85c00703da0b64a9e56060333e12fd8",
+                          "expected_failures":  [
+                                                    "nonfinite"
+                                                ],
+                          "expected_classes":  {
+
+                                               },
+                          "note":  "NaN on a documented edge input: the non-finite probe must fail."
+                      },
+                      {
+                          "name":  "third_party_distortion",
+                          "class":  "third_party",
+                          "plugin":  "verification/specimens/third_party/clap-c99-distortion/clap-c99-distortion.clap",
+                          "plugin_sha256":  "aff9be7ca8fa87f56ba059f4e29df50d7ebbe7613c355dd7b35cd80487a1eeee",
+                          "scenario":  "verification/scenarios/third_party_distortion.json",
+                          "scenario_sha256":  "4ea89f935439ab2004c3970a69d1b4b12fa1a8ad7e56e8e860b66c90bb4563f9",
+                          "expected_failures":  [
+
+                                                ],
+                          "expected_classes":  {
+                                                   "partition":  "static_partition_invariant",
+                                                   "automation":  "automation_partition_invariant_observed"
+                                               },
+                          "note":  "MIT C99 distortion (baconpaul/clap-c99-distortion): sample-offset events make automation partition-invariant."
+                      }
+                  ],
+    "runs":  [
+                 {
+                     "specimen":  "pulse",
+                     "iteration":  1,
+                     "exit_code":  0,
+                     "timed_out":  false,
+                     "evidence":  "C:\\Users\\saman\\dev\\pulse\\verification\\reports\\2026-11-22-194357\\runs\\pulse\\run1\\evidence.json",
+                     "stdout":  "C:\\Users\\saman\\dev\\pulse\\verification\\reports\\2026-11-22-194357\\runs\\pulse\\run1\\worker.stdout.txt",
+                     "stderr":  "C:\\Users\\saman\\dev\\pulse\\verification\\reports\\2026-11-22-194357\\runs\\pulse\\run1\\worker.stderr.txt",
+                     "evidence_ok":  true
+                 },
+                 {
+                     "specimen":  "pulse",
+                     "iteration":  2,
+                     "exit_code":  0,
+                     "timed_out":  false,
+                     "evidence":  "C:\\Users\\saman\\dev\\pulse\\verification\\reports\\2026-11-22-194357\\runs\\pulse\\run2\\evidence.json",
+                     "stdout":  "C:\\Users\\saman\\dev\\pulse\\verification\\reports\\2026-11-22-194357\\runs\\pulse\\run2\\worker.stdout.txt",
+                     "stderr":  "C:\\Users\\saman\\dev\\pulse\\verification\\reports\\2026-11-22-194357\\runs\\pulse\\run2\\worker.stderr.txt",
+                     "evidence_ok":  true
+                 },
+                 {
+                     "specimen":  "gain",
+                     "iteration":  1,
+                     "exit_code":  0,
+                     "timed_out":  false,
+                     "evidence":  "C:\\Users\\saman\\dev\\pulse\\verification\\reports\\2026-11-22-194357\\runs\\gain\\run1\\evidence.json",
+                     "stdout":  "C:\\Users\\saman\\dev\\pulse\\verification\\reports\\2026-11-22-194357\\runs\\gain\\run1\\worker.stdout.txt",
+                     "stderr":  "C:\\Users\\saman\\dev\\pulse\\verification\\reports\\2026-11-22-194357\\runs\\gain\\run1\\worker.stderr.txt",
+                     "evidence_ok":  true
+                 },
+                 {
+                     "specimen":  "gain",
+                     "iteration":  2,
+                     "exit_code":  0,
+                     "timed_out":  false,
+                     "evidence":  "C:\\Users\\saman\\dev\\pulse\\verification\\reports\\2026-11-22-194357\\runs\\gain\\run2\\evidence.json",
+                     "stdout":  "C:\\Users\\saman\\dev\\pulse\\verification\\reports\\2026-11-22-194357\\runs\\gain\\run2\\worker.stdout.txt",
+                     "stderr":  "C:\\Users\\saman\\dev\\pulse\\verification\\reports\\2026-11-22-194357\\runs\\gain\\run2\\worker.stderr.txt",
+                     "evidence_ok":  true
+                 },
+                 {
+                     "specimen":  "biquad",
+                     "iteration":  1,
+                     "exit_code":  0,
+                     "timed_out":  false,
+                     "evidence":  "C:\\Users\\saman\\dev\\pulse\\verification\\reports\\2026-11-22-194357\\runs\\biquad\\run1\\evidence.json",
+                     "stdout":  "C:\\Users\\saman\\dev\\pulse\\verification\\reports\\2026-11-22-194357\\runs\\biquad\\run1\\worker.stdout.txt",
+                     "stderr":  "C:\\Users\\saman\\dev\\pulse\\verification\\reports\\2026-11-22-194357\\runs\\biquad\\run1\\worker.stderr.txt",
+                     "evidence_ok":  true
+                 },
+                 {
+                     "specimen":  "biquad",
+                     "iteration":  2,
+                     "exit_code":  0,
+                     "timed_out":  false,
+                     "evidence":  "C:\\Users\\saman\\dev\\pulse\\verification\\reports\\2026-11-22-194357\\runs\\biquad\\run2\\evidence.json",
+                     "stdout":  "C:\\Users\\saman\\dev\\pulse\\verification\\reports\\2026-11-22-194357\\runs\\biquad\\run2\\worker.stdout.txt",
+                     "stderr":  "C:\\Users\\saman\\dev\\pulse\\verification\\reports\\2026-11-22-194357\\runs\\biquad\\run2\\worker.stderr.txt",
+                     "evidence_ok":  true
+                 },
+                 {
+                     "specimen":  "delay",
+                     "iteration":  1,
+                     "exit_code":  0,
+                     "timed_out":  false,
+                     "evidence":  "C:\\Users\\saman\\dev\\pulse\\verification\\reports\\2026-11-22-194357\\runs\\delay\\run1\\evidence.json",
+                     "stdout":  "C:\\Users\\saman\\dev\\pulse\\verification\\reports\\2026-11-22-194357\\runs\\delay\\run1\\worker.stdout.txt",
+                     "stderr":  "C:\\Users\\saman\\dev\\pulse\\verification\\reports\\2026-11-22-194357\\runs\\delay\\run1\\worker.stderr.txt",
+                     "evidence_ok":  true
+                 },
+                 {
+                     "specimen":  "delay",
+                     "iteration":  2,
+                     "exit_code":  0,
+                     "timed_out":  false,
+                     "evidence":  "C:\\Users\\saman\\dev\\pulse\\verification\\reports\\2026-11-22-194357\\runs\\delay\\run2\\evidence.json",
+                     "stdout":  "C:\\Users\\saman\\dev\\pulse\\verification\\reports\\2026-11-22-194357\\runs\\delay\\run2\\worker.stdout.txt",
+                     "stderr":  "C:\\Users\\saman\\dev\\pulse\\verification\\reports\\2026-11-22-194357\\runs\\delay\\run2\\worker.stderr.txt",
+                     "evidence_ok":  true
+                 },
+                 {
+                     "specimen":  "block_smoother",
+                     "iteration":  1,
+                     "exit_code":  1,
+                     "timed_out":  false,
+                     "evidence":  "C:\\Users\\saman\\dev\\pulse\\verification\\reports\\2026-11-22-194357\\runs\\block_smoother\\run1\\evidence.json",
+                     "stdout":  "C:\\Users\\saman\\dev\\pulse\\verification\\reports\\2026-11-22-194357\\runs\\block_smoother\\run1\\worker.stdout.txt",
+                     "stderr":  "C:\\Users\\saman\\dev\\pulse\\verification\\reports\\2026-11-22-194357\\runs\\block_smoother\\run1\\worker.stderr.txt",
+                     "evidence_ok":  true
+                 },
+                 {
+                     "specimen":  "block_smoother",
+                     "iteration":  2,
+                     "exit_code":  1,
+                     "timed_out":  false,
+                     "evidence":  "C:\\Users\\saman\\dev\\pulse\\verification\\reports\\2026-11-22-194357\\runs\\block_smoother\\run2\\evidence.json",
+                     "stdout":  "C:\\Users\\saman\\dev\\pulse\\verification\\reports\\2026-11-22-194357\\runs\\block_smoother\\run2\\worker.stdout.txt",
+                     "stderr":  "C:\\Users\\saman\\dev\\pulse\\verification\\reports\\2026-11-22-194357\\runs\\block_smoother\\run2\\worker.stderr.txt",
+                     "evidence_ok":  true
+                 },
+                 {
+                     "specimen":  "leaky_delay",
+                     "iteration":  1,
+                     "exit_code":  1,
+                     "timed_out":  false,
+                     "evidence":  "C:\\Users\\saman\\dev\\pulse\\verification\\reports\\2026-11-22-194357\\runs\\leaky_delay\\run1\\evidence.json",
+                     "stdout":  "C:\\Users\\saman\\dev\\pulse\\verification\\reports\\2026-11-22-194357\\runs\\leaky_delay\\run1\\worker.stdout.txt",
+                     "stderr":  "C:\\Users\\saman\\dev\\pulse\\verification\\reports\\2026-11-22-194357\\runs\\leaky_delay\\run1\\worker.stderr.txt",
+                     "evidence_ok":  true
+                 },
+                 {
+                     "specimen":  "leaky_delay",
+                     "iteration":  2,
+                     "exit_code":  1,
+                     "timed_out":  false,
+                     "evidence":  "C:\\Users\\saman\\dev\\pulse\\verification\\reports\\2026-11-22-194357\\runs\\leaky_delay\\run2\\evidence.json",
+                     "stdout":  "C:\\Users\\saman\\dev\\pulse\\verification\\reports\\2026-11-22-194357\\runs\\leaky_delay\\run2\\worker.stdout.txt",
+                     "stderr":  "C:\\Users\\saman\\dev\\pulse\\verification\\reports\\2026-11-22-194357\\runs\\leaky_delay\\run2\\worker.stderr.txt",
+                     "evidence_ok":  true
+                 },
+                 {
+                     "specimen":  "nan_trigger",
+                     "iteration":  1,
+                     "exit_code":  1,
+                     "timed_out":  false,
+                     "evidence":  "C:\\Users\\saman\\dev\\pulse\\verification\\reports\\2026-11-22-194357\\runs\\nan_trigger\\run1\\evidence.json",
+                     "stdout":  "C:\\Users\\saman\\dev\\pulse\\verification\\reports\\2026-11-22-194357\\runs\\nan_trigger\\run1\\worker.stdout.txt",
+                     "stderr":  "C:\\Users\\saman\\dev\\pulse\\verification\\reports\\2026-11-22-194357\\runs\\nan_trigger\\run1\\worker.stderr.txt",
+                     "evidence_ok":  true
+                 },
+                 {
+                     "specimen":  "nan_trigger",
+                     "iteration":  2,
+                     "exit_code":  1,
+                     "timed_out":  false,
+                     "evidence":  "C:\\Users\\saman\\dev\\pulse\\verification\\reports\\2026-11-22-194357\\runs\\nan_trigger\\run2\\evidence.json",
+                     "stdout":  "C:\\Users\\saman\\dev\\pulse\\verification\\reports\\2026-11-22-194357\\runs\\nan_trigger\\run2\\worker.stdout.txt",
+                     "stderr":  "C:\\Users\\saman\\dev\\pulse\\verification\\reports\\2026-11-22-194357\\runs\\nan_trigger\\run2\\worker.stderr.txt",
+                     "evidence_ok":  true
+                 },
+                 {
+                     "specimen":  "third_party_distortion",
+                     "iteration":  1,
+                     "exit_code":  0,
+                     "timed_out":  false,
+                     "evidence":  "C:\\Users\\saman\\dev\\pulse\\verification\\reports\\2026-11-22-194357\\runs\\third_party_distortion\\run1\\evidence.json",
+                     "stdout":  "C:\\Users\\saman\\dev\\pulse\\verification\\reports\\2026-11-22-194357\\runs\\third_party_distortion\\run1\\worker.stdout.txt",
+                     "stderr":  "C:\\Users\\saman\\dev\\pulse\\verification\\reports\\2026-11-22-194357\\runs\\third_party_distortion\\run1\\worker.stderr.txt",
+                     "evidence_ok":  true
+                 },
+                 {
+                     "specimen":  "third_party_distortion",
+                     "iteration":  2,
+                     "exit_code":  0,
+                     "timed_out":  false,
+                     "evidence":  "C:\\Users\\saman\\dev\\pulse\\verification\\reports\\2026-11-22-194357\\runs\\third_party_distortion\\run2\\evidence.json",
+                     "stdout":  "C:\\Users\\saman\\dev\\pulse\\verification\\reports\\2026-11-22-194357\\runs\\third_party_distortion\\run2\\worker.stdout.txt",
+                     "stderr":  "C:\\Users\\saman\\dev\\pulse\\verification\\reports\\2026-11-22-194357\\runs\\third_party_distortion\\run2\\worker.stderr.txt",
+                     "evidence_ok":  true
+                 }
+             ],
+    "limitations":  [
+                        "CI is billing-blocked; this evidence is local Windows x64.",
+                        "The numeric environment is observed (FTZ/DAZ, contraction, CPU model), never claimed hermetic.",
+                        "Finite probes do not prove universal determinism or real-time safety.",
+                        "A passing partition probe is byte equality for this input and these partitions, not a proof for every schedule."
+                    ]
+}

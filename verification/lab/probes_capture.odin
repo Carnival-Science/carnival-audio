@@ -203,7 +203,7 @@ probe_gap :: proc(ctx: ^Run_Context) -> Probe_Builder {
 	builder := probe_start(
 		"gap",
 		"audio_discontinuity_segments",
-		"The host skips an absolute input range and advances the steady sample clock. The wire record has no segment id, so this probe checks observable consequences: no window straddles the lost range, post-gap windows align to the post-gap frame, and post-gap records are audio-invalid while capture validity is unaffected.",
+		"The host skips an absolute input range and advances the steady sample clock. The wire record has no segment id, so this probe checks observable consequences: no window straddles the lost range, post-gap windows align to the post-gap frame, the affected boundary window is audio-invalid, and later contiguous windows are valid again while capture validity is unaffected.",
 	)
 	if !ctx.scenario.telemetry.enabled || len(ctx.scenario.gaps) == 0 {
 		builder.status = .Skip
@@ -237,7 +237,9 @@ probe_gap :: proc(ctx: ^Run_Context) -> Probe_Builder {
 	post_records := 0
 	overlapping := 0
 	first_post_start := i64(-1)
-	post_invalid := 0
+	first_post_invalid := false
+	later_post_valid := 0
+	later_post_invalid := 0
 	for record in result.records {
 		start := int(record.start_frame)
 		end := start + int(record.frames)
@@ -250,9 +252,11 @@ probe_gap :: proc(ctx: ^Run_Context) -> Probe_Builder {
 			post_records += 1
 			if first_post_start < 0 {
 				first_post_start = record.start_frame
-			}
-			if record.valid {
-				post_invalid += 1
+				first_post_invalid = !record.valid && record.overrun
+			} else if record.valid && !record.overrun {
+				later_post_valid += 1
+			} else {
+				later_post_invalid += 1
 			}
 		} else {
 			overlapping += 1
@@ -262,6 +266,9 @@ probe_gap :: proc(ctx: ^Run_Context) -> Probe_Builder {
 	metric_add_int(&builder, "post_gap_records", post_records)
 	metric_add_int(&builder, "records_straddling_gap", overlapping)
 	metric_add_int(&builder, "first_post_gap_start", int(first_post_start))
+	metric_add_int(&builder, "first_post_gap_invalid", int(first_post_invalid))
+	metric_add_int(&builder, "later_post_gap_valid", later_post_valid)
+	metric_add_int(&builder, "later_post_gap_invalid", later_post_invalid)
 	if overlapping != 0 {
 		probe_fail(&builder, "a measurement window straddles the lost range")
 	}
@@ -275,19 +282,30 @@ probe_gap :: proc(ctx: ^Run_Context) -> Probe_Builder {
 	if post_records == 0 {
 		probe_fail(&builder, "no post-gap records were produced")
 	}
-	if post_invalid != 0 {
-		probe_fail(&builder, fmt.aprintf("%d post-gap records are still marked audio-valid", post_invalid))
+	// Finding 3: the affected/boundary window is invalid, but the epoch does
+	// not stay latched. Later windows with contiguous data are valid again.
+	if post_records > 0 && !first_post_invalid {
+		probe_fail(&builder, "the first post-gap (affected) window is still marked audio-valid")
+	}
+	if later_post_invalid != 0 {
+		probe_fail(&builder, fmt.aprintf(
+			"%d post-gap records after the affected window are still audio-invalid",
+			later_post_invalid,
+		))
+	}
+	if later_post_valid == 0 && post_records > 1 {
+		probe_fail(&builder, "no later post-gap record became audio-valid in the new segment")
 	}
 	if !result.capture_valid {
 		probe_fail(&builder, "lost audio must not invalidate the capture domain")
 	}
 	if builder.status == .Pass {
 		builder.summary = fmt.aprintf(
-			"gap [%d,%d) recorded; %d post-gap records start at %d and are audio-invalid",
+			"gap [%d,%d) recorded; first post-gap window at %d is the invalid affected window, %d later windows are audio-valid",
 			gap_start,
 			gap_end,
-			post_records,
 			first_post_start,
+			later_post_valid,
 		)
 	}
 	return builder

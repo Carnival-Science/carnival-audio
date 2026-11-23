@@ -1,0 +1,12 @@
+probe nonfinite          pass non_finite_output                          32768 output samples, all finite
+probe repeatability      pass fresh_instance_repeatability               byte-identical output and records across two fresh instances
+probe partition          pass static_partition_invariant                 byte-identical output and records across every declared partition
+probe automation         pass automation_partition_sensitive_control_rate automation changes across 2 audio and 0 record partition comparisons (observed control-rate class)
+probe state              pass authoring_state_and_migration              authoring round trip restored 2 parameters
+probe checkpoint         pass processing_checkpoint_restore              checkpoint restore continues the suffix bit-exactly (8192 frames after a 8192-frame prefix)
+probe isolation          pass instance_isolation                         both interleaved instances match their solo runs
+probe reset              pass reset_clean_state                          post-reset reprocessing matches a fresh instance
+probe tail               pass tail_boundedness                           tail fell below -90.0 dBFS after 80 frames (declared hint 0)
+probe perturbation       pass paired_input_response                      delta at frame 1000 affects 161 output frames starting at 1000
+RESULT specimen=com.carnival-science.reference.biquad scenario=reference-biquad-census pass=10 fail=0 skip=0 exit=0
+
