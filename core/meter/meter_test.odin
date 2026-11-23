@@ -9,6 +9,8 @@ import "core:math"
 import "core:mem"
 import "core:testing"
 
+import "carnival:core/transport"
+
 SINE_FRAMES :: 10000
 
 sine_interleaved :: proc(frames: int, rate: int = 48000, frequency: f64 = 750) -> []f32 {
@@ -138,21 +140,101 @@ test_explicit_discontinuity_starts_new_epoch_and_window :: proc(t: ^testing.T) {
 
 	// An idle device/endpoint switch: no frames are known lost, so the clock
 	// stays put. The analysis epoch advances and the partial window is dropped.
-	engine_note_discontinuity(engine, 0)
+	engine_note_discontinuity(engine, 0, .Stall)
+	noted := engine_snapshot(engine)
+	testing.expect(t, noted.epoch > old_epoch, "the note immediately publishes the new epoch")
+	testing.expect(t, !noted.valid && noted.overrun && !noted.window_valid,
+		"the note immediately publishes an invalid current window")
+	testing.expect_value(t, engine_discontinuity_count(engine), 1)
+	ledger, ledger_ok := engine_discontinuity_at(engine, 0)
+	testing.expect(t, ledger_ok && ledger.event == .Stall && ledger.frames == 0,
+		"the historical ledger records the stall")
+
 	_ = engine_push_interleaved(engine, samples[3000 * CHANNELS:], 1024, -1)
 	after := drain_all(engine)
 	defer delete(after)
 	testing.expect_value(t, len(after), 2)
 	testing.expect_value(t, after[0].start_frame, i64(3000))
 	testing.expect(t, after[0].epoch > old_epoch, "epoch advanced across the discontinuity")
-	testing.expect(t, !after[0].valid && after[0].overrun, "post-discontinuity audio is invalid")
+	testing.expect(t, !after[0].valid && after[0].overrun,
+		"the boundary/affected window is invalid")
 	testing.expect(t, after[0].capture_valid, "audio loss does not invalidate capture")
+	testing.expect(t, after[1].valid && !after[1].overrun,
+		"the next contiguous window is valid again in the new epoch")
 
 	// No window straddles the boundary: the partial window at 2560..3000 is
 	// discarded rather than completed with post-gap samples.
 	for record in after {
 		testing.expect(t, record.start_frame >= 3000, "post-discontinuity window starts at the boundary")
 	}
+	resumed := engine_snapshot(engine)
+	testing.expect(t, resumed.valid && !resumed.overrun,
+		"presentation recovers without an explicit reset")
+	testing.expect_value(t, engine_discontinuity_count(engine), 1)
+}
+
+@(test)
+test_note_discontinuity_publishes_without_further_audio :: proc(t: ^testing.T) {
+	engine := engine_create()
+	defer engine_destroy(engine)
+	testing.expect(t, engine_activate(engine, 48000, 1024), "activate")
+
+	quiet := engine_snapshot(engine)
+	testing.expect_value(t, quiet.generation, u64(0))
+	engine_note_discontinuity(engine, 0, .Device_Lost)
+	noted := engine_snapshot(engine)
+	testing.expect(t, noted.schema_version == transport.SNAPSHOT_SCHEMA_VERSION,
+		"snapshot schema version")
+	testing.expect(t, noted.generation > quiet.generation,
+		"a discontinuity publishes a snapshot with no subsequent audio")
+	testing.expect(t, noted.epoch == engine.epoch, "snapshot carries the bumped epoch")
+	testing.expect(t, !noted.valid && noted.overrun && !noted.window_valid,
+		"the published snapshot is explicitly invalid, not stale-live")
+	ledger, ok := engine_discontinuity_at(engine, 0)
+	testing.expect(t, ok && ledger.event == .Device_Lost, "device loss is in the ledger")
+}
+
+@(test)
+test_snapshot_separates_window_peak_hold_and_session_max :: proc(t: ^testing.T) {
+	engine := engine_create()
+	defer engine_destroy(engine)
+	testing.expect(t, engine_activate(engine, 48000, 1024), "activate")
+	parameters := default_parameters()
+	parameters.window_frames = 512
+	parameters.hold_frames = 4800
+	parameters.hold_decay_enabled = false
+	engine_set_parameters(engine, parameters)
+
+	loud := make([]f32, 512 * CHANNELS)
+	defer delete(loud)
+	for index in 0 ..< len(loud) {
+		loud[index] = index % CHANNELS == 0 ? 0.8 : -0.4
+	}
+	_ = engine_push_interleaved(engine, loud, 512, -1)
+	first := engine_snapshot(engine)
+	testing.expectf(t, math.abs(first.window_peak[0] - 0.8) < 1e-6, "window peak %v", first.window_peak[0])
+	testing.expectf(t, math.abs(first.session_max[0] - 0.8) < 1e-6, "session max %v", first.session_max[0])
+	testing.expectf(t, math.abs(first.peak_hold[0] - 0.8) < 1e-6, "peak hold %v", first.peak_hold[0])
+
+	quiet := make([]f32, 512 * CHANNELS)
+	defer delete(quiet)
+	for index in 0 ..< len(quiet) {
+		quiet[index] = index % CHANNELS == 0 ? 0.1 : -0.05
+	}
+	_ = engine_push_interleaved(engine, quiet, 512, -1)
+	second := engine_snapshot(engine)
+	testing.expectf(t, math.abs(second.window_peak[0] - 0.1) < 1e-6,
+		"current window follows the quiet input: %v", second.window_peak[0])
+	testing.expectf(t, second.session_max[0] > 0.7,
+		"session maximum keeps the loud peak: %v", second.session_max[0])
+	testing.expectf(t, second.peak_hold[0] > 0.7,
+		"peak hold keeps the loud peak: %v", second.peak_hold[0])
+
+	engine_note_discontinuity(engine, 0, .Stall)
+	third := engine_snapshot(engine)
+	testing.expect_value(t, third.session_max[0], f32(0))
+	testing.expect_value(t, third.peak_hold[0], f32(0))
+	testing.expect(t, third.epoch > second.epoch, "epoch bump resets the session maximum")
 }
 
 @(test)

@@ -589,13 +589,15 @@ test_snapshot_latest_wins_and_copies :: proc(t: ^testing.T) {
 	testing.expect(t, !initial.valid && initial.generation == 0, "empty publisher reads invalid")
 
 	first := Measurement_Snapshot{
+		schema_version = SNAPSHOT_SCHEMA_VERSION,
 		valid = true,
+		window_valid = true,
 		epoch = 1,
 		frame = 480,
 		sample_rate = 48000,
 		channels = 2,
-		peak = {0.5, 0.25},
-		peak_frame = {479, 478},
+		window_peak = {0.5, 0.25},
+		window_peak_frame = {479, 478},
 		rms = {0.35, 0.1},
 		correlation = -0.5,
 		correlation_valid = true,
@@ -605,17 +607,17 @@ test_snapshot_latest_wins_and_copies :: proc(t: ^testing.T) {
 	read := snapshot_read(&publisher)
 	testing.expect_value(t, read.generation, u64(2))
 	testing.expect(t, read.valid && read.frame == 480, "first snapshot read")
-	testing.expect_value(t, read.peak[1], f32(0.25))
+	testing.expect_value(t, read.window_peak[1], f32(0.25))
 	testing.expect_value(t, snapshot_generation(&publisher), u64(2))
 
 	second := first
 	second.frame = 960
-	second.peak = {0.75, 0.5}
+	second.window_peak = {0.75, 0.5}
 	generation = snapshot_publish(&publisher, second)
 	testing.expect_value(t, generation, u64(4))
 	read = snapshot_read(&publisher)
 	testing.expect(t, read.frame == 960, "latest wins")
-	testing.expect_value(t, read.peak[0], f32(0.75))
+	testing.expect_value(t, read.window_peak[0], f32(0.75))
 
 	// A returned snapshot is a value copy, not a borrowed buffer.
 	read.frame = -1
@@ -657,19 +659,23 @@ Snapshot_Stress_Reader :: struct {
 snapshot_stress_record :: proc(generation: u64) -> Measurement_Snapshot {
 	return Measurement_Snapshot{
 		generation = generation,
+		schema_version = SNAPSHOT_SCHEMA_VERSION,
 		valid = true,
 		overrun = generation % 7 == 0,
+		window_valid = generation % 5 != 0,
 		epoch = generation,
 		frame = i64(generation),
 		sample_rate = 48000,
 		channels = 2,
-		peak = {f32(generation % 1024), f32((generation * 3) % 1024)},
-		peak_frame = {i64(generation * 2), i64(generation * 2 + 1)},
-		peak_db = {f32(generation % 512), f32((generation * 5) % 512)},
+		window_peak = {f32(generation % 1024), f32((generation * 3) % 1024)},
+		window_peak_frame = {i64(generation * 2), i64(generation * 2 + 1)},
+		window_peak_db = {f32(generation % 512), f32((generation * 5) % 512)},
 		rms = {f32(generation % 256), f32((generation * 7) % 256)},
 		rms_db = {f32(generation % 128), f32((generation * 11) % 128)},
-		hold = {f32(generation % 64), f32((generation * 13) % 64)},
-		hold_db = {f32(generation % 32), f32((generation * 17) % 32)},
+		peak_hold = {f32(generation % 64), f32((generation * 13) % 64)},
+		peak_hold_db = {f32(generation % 32), f32((generation * 17) % 32)},
+		session_max = {f32(generation % 16), f32((generation * 19) % 16)},
+		session_max_db = {f32(generation % 8), f32((generation * 23) % 8)},
 		correlation = f32(generation % 2000) - 1000,
 		correlation_valid = generation % 3 == 0,
 	}
@@ -792,18 +798,22 @@ test_snapshot_concurrent_publication_stress :: proc(t: ^testing.T) {
 test_snapshot_fingerprint_repeatable :: proc(t: ^testing.T) {
 	snapshot := Measurement_Snapshot{
 		generation = 8,
+		schema_version = SNAPSHOT_SCHEMA_VERSION,
 		valid = true,
+		window_valid = true,
 		epoch = 2,
 		frame = 1024,
 		sample_rate = 48000,
 		channels = 2,
-		peak = {0.5, 0.25},
-		peak_frame = {1000, 1001},
-		peak_db = {-6.0206, -12.0412},
+		window_peak = {0.5, 0.25},
+		window_peak_frame = {1000, 1001},
+		window_peak_db = {-6.0206, -12.0412},
 		rms = {0.35355338, 0.17677669},
 		rms_db = {-9.0309, -15.0512},
-		hold = {0.6, 0.3},
-		hold_db = {-4.4369, -10.4574},
+		peak_hold = {0.6, 0.3},
+		peak_hold_db = {-4.4369, -10.4574},
+		session_max = {0.75, 0.5},
+		session_max_db = {-2.4988, -6.0206},
 		correlation = 0.25,
 		correlation_valid = true,
 	}

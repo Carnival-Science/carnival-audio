@@ -7,7 +7,7 @@
 //   writer: sequence++ (odd)  -> publish full record -> sequence++ (even)
 //   reader: read even seq, copy record, re-read seq; accept iff unchanged
 //
-// Why a seqlock rather than a rotating buffer: the record is a fixed 120-byte
+// Why a seqlock rather than a rotating buffer: the record is a fixed-size
 // scalar record, so a stable copy needs only a handful of word loads and the
 // sequence re-check proves the writer did not touch the storage during that
 // copy. It is latest-wins, lock-free and bounded: a reader that loses the race
@@ -54,25 +54,39 @@ import "core:sync"
 // sequence re-check.
 SNAPSHOT_READ_RETRIES :: 64
 
+// SNAPSHOT_SCHEMA_VERSION documents the presentation record layout. It is
+// separate from the canonical Measurement_Record schema (core/meter): snapshots
+// are latest-wins presentation state, not the verification wire format.
+//
+// Schema 2 separates the three peak presentation values:
+//   - `window_peak`: the current analysis window;
+//   - `peak_hold`: the existing hold/decay envelope;
+//   - `session_max`: the maximum since the current analysis epoch began.
+SNAPSHOT_SCHEMA_VERSION :: u32(2)
+
 // Measurement_Snapshot is the seam consumed by the standalone meter, the CLAP
 // canonical export and the verification laboratory. Field order is part of the
 // canonical fingerprint; do not reorder without updating snapshot_fingerprint
 // and its repeatability test.
 Measurement_Snapshot :: struct {
 	generation:          u64,
+	schema_version:      u32,
 	valid:               bool,
 	overrun:             bool,
+	window_valid:        bool,
 	epoch:               u64,
 	frame:               i64,
 	sample_rate:         int,
 	channels:            int,
-	peak:                [2]f32,
-	peak_frame:          [2]i64,
-	peak_db:             [2]f32,
+	window_peak:         [2]f32,
+	window_peak_frame:   [2]i64,
+	window_peak_db:      [2]f32,
 	rms:                 [2]f32,
 	rms_db:              [2]f32,
-	hold:                [2]f32,
-	hold_db:             [2]f32,
+	peak_hold:           [2]f32,
+	peak_hold_db:        [2]f32,
+	session_max:         [2]f32,
+	session_max_db:      [2]f32,
 	correlation:         f32,
 	correlation_valid:   bool,
 }
@@ -175,20 +189,24 @@ snapshot_generation :: proc(publisher: ^Snapshot_Publisher) -> u64 {
 snapshot_fingerprint :: proc(snapshot: Measurement_Snapshot) -> u64 {
 	hash: u64 = 0xcbf29ce484222325
 	snapshot_hash_u64(&hash, snapshot.generation)
+	snapshot_hash_u64(&hash, u64(snapshot.schema_version))
 	snapshot_hash_bool(&hash, snapshot.valid)
 	snapshot_hash_bool(&hash, snapshot.overrun)
+	snapshot_hash_bool(&hash, snapshot.window_valid)
 	snapshot_hash_u64(&hash, snapshot.epoch)
 	snapshot_hash_u64(&hash, u64(snapshot.frame))
 	snapshot_hash_u64(&hash, u64(snapshot.sample_rate))
 	snapshot_hash_u64(&hash, u64(snapshot.channels))
 	for index in 0 ..< 2 {
-		snapshot_hash_f32(&hash, snapshot.peak[index])
-		snapshot_hash_u64(&hash, u64(snapshot.peak_frame[index]))
-		snapshot_hash_f32(&hash, snapshot.peak_db[index])
+		snapshot_hash_f32(&hash, snapshot.window_peak[index])
+		snapshot_hash_u64(&hash, u64(snapshot.window_peak_frame[index]))
+		snapshot_hash_f32(&hash, snapshot.window_peak_db[index])
 		snapshot_hash_f32(&hash, snapshot.rms[index])
 		snapshot_hash_f32(&hash, snapshot.rms_db[index])
-		snapshot_hash_f32(&hash, snapshot.hold[index])
-		snapshot_hash_f32(&hash, snapshot.hold_db[index])
+		snapshot_hash_f32(&hash, snapshot.peak_hold[index])
+		snapshot_hash_f32(&hash, snapshot.peak_hold_db[index])
+		snapshot_hash_f32(&hash, snapshot.session_max[index])
+		snapshot_hash_f32(&hash, snapshot.session_max_db[index])
 	}
 	snapshot_hash_f32(&hash, snapshot.correlation)
 	snapshot_hash_bool(&hash, snapshot.correlation_valid)
