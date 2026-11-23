@@ -187,14 +187,21 @@ run_fft_partitions :: proc(t: ^testing.T, samples: []f32, frames, channels, part
 pipeline_snapshot :: proc(result: Partition_Result, generation: u64 = 1) -> transport.Measurement_Snapshot {
 	snapshot := transport.Measurement_Snapshot{
 		generation = generation,
+		schema_version = transport.SNAPSHOT_SCHEMA_VERSION,
 		valid = result.peak.valid,
+		window_valid = result.peak.valid,
 		epoch = 1,
 		frame = 10000,
 		sample_rate = 48000,
 		channels = 2,
-		peak = {result.peak_channels[0].magnitude, result.peak_channels[1].magnitude},
-		peak_frame = {result.peak_channels[0].frame, result.peak_channels[1].frame},
-		peak_db = {
+		window_peak = {result.peak_channels[0].magnitude, result.peak_channels[1].magnitude},
+		window_peak_frame = {result.peak_channels[0].frame, result.peak_channels[1].frame},
+		window_peak_db = {
+			dsp.peak_amplitude_to_dbfs(result.peak_channels[0].magnitude),
+			dsp.peak_amplitude_to_dbfs(result.peak_channels[1].magnitude),
+		},
+		session_max = {result.peak_channels[0].magnitude, result.peak_channels[1].magnitude},
+		session_max_db = {
 			dsp.peak_amplitude_to_dbfs(result.peak_channels[0].magnitude),
 			dsp.peak_amplitude_to_dbfs(result.peak_channels[1].magnitude),
 		},
@@ -209,8 +216,8 @@ pipeline_snapshot :: proc(result: Partition_Result, generation: u64 = 1) -> tran
 		for channel in 0 ..< 2 {
 			snapshot.rms[channel] = result.rms.values[last][channel]
 			snapshot.rms_db[channel] = dsp.rms_to_dbfs(result.rms.values[last][channel])
-			snapshot.hold[channel] = result.peak_channels[channel].magnitude
-			snapshot.hold_db[channel] = dsp.peak_amplitude_to_dbfs(result.peak_channels[channel].magnitude)
+			snapshot.peak_hold[channel] = result.peak_channels[channel].magnitude
+			snapshot.peak_hold_db[channel] = dsp.peak_amplitude_to_dbfs(result.peak_channels[channel].magnitude)
 		}
 	}
 	if result.correlation.count > 0 {

@@ -165,7 +165,7 @@ test_silence_impulse_and_sine_measurements :: proc(t: ^testing.T) {
 	testing.expect_value(t, drain.records[0].peak[0], f32(0))
 	snapshot := meter_snapshot(harness.meter)
 	testing.expect_value(t, snapshot.rms_db[0], f32(-144.0))
-	testing.expect_value(t, snapshot.peak_db[0], f32(-144.0))
+	testing.expect_value(t, snapshot.window_peak_db[0], f32(-144.0))
 	testing.expect(t, snapshot.valid, "silence snapshot valid")
 
 	// Impulse: exact peak frame and closed-form RMS for one sample in 1024.
@@ -393,23 +393,38 @@ test_forced_overrun_invalidates_without_breaking_passthrough :: proc(t: ^testing
 	testing.expect(t, snapshot.overrun, "snapshot overrun")
 	testing.expect(t, !snapshot.valid, "overrun snapshot invalid")
 
-	// Re-enable draining; remaining queued blocks produce explicitly invalid
-	// records, and passthrough still works.
+	// Re-enable draining. The pre-overrun backlog is historically valid; the
+	// first window after the overrun boundary is the affected window, and the
+	// window after it is valid again without an explicit reset.
 	meter_test_set_drain_enabled(harness.meter, true)
 	testing.expect_value(t, direct_process(&harness, source, 256), adapter.Process_Result.Continue)
+	backlog: Drain
+	direct_drain(&harness, &backlog)
+	testing.expect(t, backlog.count > 0, "pre-overrun records emitted")
+	for record in backlog.records[:backlog.count] {
+		testing.expect(t, record.valid && !record.overrun,
+			"pre-overrun backlog stays audio-valid")
+	}
+
+	// Four more blocks complete the affected window; the next completes a
+	// contiguous window in the new segment.
+	for _ in 0 ..< 8 {
+		testing.expect_value(t, direct_process(&harness, source, 256), adapter.Process_Result.Continue)
+	}
 	drain: Drain
 	direct_drain(&harness, &drain)
-	testing.expect(t, drain.count > 0, "records emitted")
-	for record in drain.records[:drain.count] {
-		testing.expect(t, !record.valid, "record invalid after overrun")
-		testing.expect(t, record.overrun, "record overrun flag")
-	}
+	testing.expect(t, drain.count >= 2, "post-overrun records emitted")
+	testing.expect(t, !drain.records[0].valid && drain.records[0].overrun,
+		"affected window is explicitly invalid")
+	testing.expect(t, drain.records[drain.count - 1].valid,
+		"later contiguous windows are valid without reset")
 	snapshot = meter_snapshot(harness.meter)
-	testing.expect(t, snapshot.overrun && !snapshot.valid, "invalid latched until reset")
+	testing.expect(t, snapshot.valid && !snapshot.overrun,
+		"current validity recovers after the affected window")
 
 	meter_reset(harness.meter)
 	snapshot = meter_snapshot(harness.meter)
-	testing.expect(t, !snapshot.overrun, "reset clears the latch")
+	testing.expect(t, !snapshot.overrun, "reset publishes an explicit unavailable state")
 	drain = {}
 	testing.expect_value(t, direct_process(&harness, source, 256), adapter.Process_Result.Continue)
 	direct_drain(&harness, &drain)
@@ -420,7 +435,7 @@ test_forced_overrun_invalidates_without_breaking_passthrough :: proc(t: ^testing
 // Keep the transport import exercised without leaking it into the product API.
 @(private)
 transport_overrun_seen :: proc(meter: ^Meter) -> bool {
-	return meter.audio_invalid && meter.ring.overrun_latched != 0
+	return meter.ring.overrun_latched != 0
 }
 
 @(test)

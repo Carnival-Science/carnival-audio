@@ -30,9 +30,12 @@ elision and presentation profiling are M3.2 concerns.
 | `--window=FRAMES` | RMS window (default 1024) |
 | `--self-loop` | also render a 400 Hz, amplitude 0.5 sine so the loopback has a known signal |
 
-Each line reports `frm` (delivered source frames), the analysis epoch, and
-peak / RMS / hold in dBFS per channel, plus `valid` / `INVALID` and an audio
-discontinuity marker.
+Each line reports `frm` (delivered source frames), the analysis epoch, and four
+per-channel values in dBFS: `win` (last completed window peak), `hold` (the
+hold/decay envelope), `max` (session maximum since the epoch began) and `rms`.
+It also prints `valid` / `INVALID`, an audio-discontinuity marker and, while a
+device is lost, `(device unavailable)`. `win`, `hold` and `max` are distinct:
+the first two fall with the input, the third keeps the epoch's maximum.
 
 ## What "no data" means
 
@@ -46,6 +49,15 @@ Mini does not invent silence:
 - when data resumes it prints a timeline discontinuity and continues. The
   silence duration is not converted to frames.
 
+If the capture ring overruns, the frames the producer dropped are reported as a
+`dropped_delta` range. Pulse Mini pushes the delivered block that precedes the
+loss, then calls `engine_note_discontinuity` with the dropped frame count. The
+affected boundary window is invalid, the next contiguous window is valid again,
+and no manual reset is involved. Device loss is treated the same way
+immediately: the engine publishes an invalid snapshot and pulse-mini prints
+`(device unavailable)` until recovery starts a new epoch and fresh data
+arrives.
+
 ## Self-loop measurement (development machine)
 
 `--self-loop` plays 400 Hz at amplitude 0.5 (nominal −6.02 dBFS peak, −9.03
@@ -53,9 +65,9 @@ dBFS RMS). A 1.2 s run produced:
 
 ```
 pulse-mini: loopback 48000 Hz, window 1024 frames, print 4.0 Hz, duration 1.2s, self-loop tone 400 Hz
-t=  0.26s frm=12000     epoch=1 L[  -6.0/  -9.0/  -6.0 dBFS] ...
-t=  1.01s frm=48000     epoch=1 L[  -6.0/  -9.0/  -6.0 dBFS] ...
-pulse-mini: done: 57120 frames (1.190s), epoch 1, 0 stall break(s), 0 recover(ies), 0 dropped, final valid
+t=  0.26s frm=12000     epoch=1 L[win -6.0 hold -6.0 max -6.0 rms -9.0 dBFS] ...
+t=  1.01s frm=48000     epoch=1 L[win -6.0 hold -6.0 max -6.0 rms -9.0 dBFS] ...
+pulse-mini: done: 57120 frames (1.190s), epoch 1, 0 stall break(s), 0 recover(ies), 0 overrun(s), 0 dropped, session max -6.0/-6.0 dBFS, final valid
 ```
 
 The packaged self-loop test (adapters/wasapi) is stricter: it discards the
